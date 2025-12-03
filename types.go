@@ -3,8 +3,8 @@ package redis
 import (
 	"sync"
 
+	"github.com/go-lynx/lynx-redis/conf"
 	"github.com/go-lynx/lynx/plugins"
-	"github.com/go-lynx/lynx/plugins/nosql/redis/conf"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,7 +26,7 @@ func (r *PlugRedis) GetPoolStats() *redis.PoolStats {
 	if r.rdb == nil {
 		return nil
 	}
-	
+
 	// Compatible with different client types
 	switch c := r.rdb.(type) {
 	case *redis.Client:

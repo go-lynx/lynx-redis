@@ -1,10 +1,8 @@
-module github.com/go-lynx/lynx/plugins/nosql/redis
+module github.com/go-lynx/lynx-redis
 
 go 1.25
 
 toolchain go1.25.3
-
-replace github.com/go-lynx/lynx => ../../../
 
 require (
 	github.com/go-kratos/kratos/v2 v2.9.1
@@ -52,3 +50,5 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/go-lynx/lynx => ../lynx

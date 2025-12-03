@@ -1,8 +1,8 @@
 package redis
 
 import (
-	"github.com/go-lynx/lynx/app"
-	"github.com/go-lynx/lynx/app/factory"
+	"github.com/go-lynx/lynx"
+	"github.com/go-lynx/lynx/pkg/factory"
 	"github.com/go-lynx/lynx/plugins"
 	"github.com/redis/go-redis/v9"
 )
@@ -25,7 +25,7 @@ func init() {
 // finally converts the plugin instance to *PlugRedis type and returns its rdb field, which is the Redis client.
 // GetRedis returns the underlying *redis.Client, only available in single node mode; returns nil for Cluster/Sentinel.
 func GetRedis() *redis.Client {
-	plugin := app.Lynx().GetPluginManager().GetPlugin(pluginName)
+	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
 	if plugin == nil {
 		return nil
 	}
@@ -38,7 +38,7 @@ func GetRedis() *redis.Client {
 
 // GetUniversalRedis returns the universal client, usable for single node/cluster/sentinel modes.
 func GetUniversalRedis() redis.UniversalClient {
-	plugin := app.Lynx().GetPluginManager().GetPlugin(pluginName)
+	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
 	if plugin == nil {
 		return nil
 	}

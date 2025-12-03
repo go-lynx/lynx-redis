@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-lynx/lynx/plugins/nosql/redis/conf"
+	"github.com/go-lynx/lynx-redis/conf"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
