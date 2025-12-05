@@ -29,8 +29,20 @@ func GetRedis() *redis.Client {
 	if plugin == nil {
 		return nil
 	}
-	// Try to assert as *redis.Client (single node)
-	if c, ok := plugin.(*PlugRedis).rdb.(*redis.Client); ok {
+	// Use reflection or interface to avoid package path issues
+	// First try direct type assertion
+	if plugRedis, ok := plugin.(*PlugRedis); ok {
+		if c, ok := plugRedis.rdb.(*redis.Client); ok {
+			return c
+		}
+		return nil
+	}
+	// If direct assertion fails, try using GetUniversalRedis and check type
+	universalClient := GetUniversalRedis()
+	if universalClient == nil {
+		return nil
+	}
+	if c, ok := universalClient.(*redis.Client); ok {
 		return c
 	}
 	return nil
@@ -42,5 +54,15 @@ func GetUniversalRedis() redis.UniversalClient {
 	if plugin == nil {
 		return nil
 	}
-	return plugin.(*PlugRedis).rdb
+	// Try direct type assertion first
+	if plugRedis, ok := plugin.(*PlugRedis); ok {
+		return plugRedis.rdb
+	}
+	// If direct assertion fails, try using interface method
+	if plugRedis, ok := plugin.(interface {
+		GetUniversalClient() redis.UniversalClient
+	}); ok {
+		return plugRedis.GetUniversalClient()
+	}
+	return nil
 }

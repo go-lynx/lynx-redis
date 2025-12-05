@@ -1,6 +1,8 @@
 package redis
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -104,9 +106,19 @@ var (
 	}, []string{"version", "mode", "client_name"})
 )
 
+var metricsRegistered bool
+var metricsMutex sync.Mutex
+
 func init() {
-	// Best effort register; ignore duplicate registration panics by using MustRegister once per process
-	prometheus.MustRegister(
+	// Best effort register; ignore duplicate registration panics
+	metricsMutex.Lock()
+	defer metricsMutex.Unlock()
+
+	if metricsRegistered {
+		return
+	}
+
+	collectors := []prometheus.Collector{
 		redisStartupTotal,
 		redisStartupFailedTotal,
 		redisPingLatency,
@@ -122,5 +134,16 @@ func init() {
 		redisIsMaster,
 		redisConnectedSlaves,
 		redisServerInfo,
-	)
+	}
+
+	for _, collector := range collectors {
+		if err := prometheus.Register(collector); err != nil {
+			// Ignore already registered errors
+			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+				// Only return if it's not an already registered error
+				return
+			}
+		}
+	}
+	metricsRegistered = true
 }
