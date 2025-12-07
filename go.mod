@@ -6,7 +6,7 @@ toolchain go1.25.3
 
 require (
 	github.com/go-kratos/kratos/v2 v2.9.1
-	github.com/go-lynx/lynx v1.2.3
+	github.com/go-lynx/lynx v1.5.0
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/prometheus/client_golang v1.23.0
@@ -50,5 +50,3 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/go-lynx/lynx => ../lynx
