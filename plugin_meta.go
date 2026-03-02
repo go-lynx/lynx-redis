@@ -9,7 +9,7 @@ const (
 	// Plugin unique name
 	pluginName = "redis.client"
 	// Plugin version number
-	pluginVersion = "v2.0.0"
+	pluginVersion = "v1.5.4"
 	// Plugin description
 	pluginDescription = "redis plugin for lynx framework"
 	// Configuration prefix, used to read plugin-related configuration from config
