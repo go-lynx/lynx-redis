@@ -16,6 +16,8 @@ type PlugRedis struct {
 	conf *conf.Redis
 	// Redis client instance (supports single node/cluster/sentinel)
 	rdb redis.UniversalClient
+	// Runtime reference for registering shared resource (set in InitializeResources)
+	rt plugins.Runtime
 	// Metrics collection
 	statsQuit chan struct{}
 	statsWG   sync.WaitGroup

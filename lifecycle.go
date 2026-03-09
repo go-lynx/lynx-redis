@@ -16,6 +16,7 @@ import (
 // Parameter rt is the runtime environment
 // Returns error information, returns corresponding error if configuration loading fails
 func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
+	r.rt = rt
 	// Initialize an empty configuration structure
 	r.conf = &conf.Redis{}
 
@@ -68,6 +69,13 @@ func (r *PlugRedis) StartupTasks() error {
 	// Determine mode (single node/cluster/sentinel)
 	mode := r.detectMode()
 	log.Infof("redis client successfully started, mode=%s, addrs=%v, ping_latency=%s", mode, r.currentAddrList(), latency)
+
+	// Register client as shared resource so other plugins (e.g. eon-id) can get it via GetSharedResource("redis")
+	if r.rt != nil {
+		if err := r.rt.RegisterSharedResource("redis", r.rdb); err != nil {
+			log.Warnf("failed to register redis as shared resource: %v", err)
+		}
+	}
 
 	// Perform enhanced check at startup stage
 	r.enhancedReadinessCheck(mode)
