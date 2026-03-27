@@ -16,6 +16,9 @@ import (
 // Parameter rt is the runtime environment
 // Returns error information, returns corresponding error if configuration loading fails
 func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
+	if err := r.BasePlugin.InitializeResources(rt); err != nil {
+		return err
+	}
 	r.rt = rt
 	// Initialize an empty configuration structure
 	r.conf = &conf.Redis{}
@@ -70,10 +73,16 @@ func (r *PlugRedis) StartupTasks() error {
 	mode := r.detectMode()
 	log.Infof("redis client successfully started, mode=%s, addrs=%v, ping_latency=%s", mode, r.currentAddrList(), latency)
 
-	// Register client as shared resource so other plugins (e.g. eon-id) can get it via GetSharedResource("redis")
 	if r.rt != nil {
-		if err := r.rt.RegisterSharedResource("redis", r.rdb); err != nil {
-			log.Warnf("failed to register redis as shared resource: %v", err)
+		// Keep the legacy shared alias for existing plugins while also publishing the stable plugin name.
+		for _, resourceName := range []string{"redis", pluginName} {
+			if err := r.rt.RegisterSharedResource(resourceName, r.rdb); err != nil {
+				log.Warnf("failed to register redis shared resource %s: %v", resourceName, err)
+			}
+		}
+		// Publish a plugin-scoped handle for future internal consumers that should not use global shared names.
+		if err := r.rt.RegisterPrivateResource("client", r.rdb); err != nil {
+			log.Warnf("failed to register redis private client resource: %v", err)
 		}
 	}
 
@@ -167,8 +176,19 @@ func (r *PlugRedis) Configure(c any) error {
 	if c == nil {
 		return nil
 	}
-	// Convert the incoming configuration to *conf.Redis type and update to plugin configuration
-	r.conf = c.(*conf.Redis)
+	newConf, ok := c.(*conf.Redis)
+	if !ok {
+		return fmt.Errorf("invalid configuration type for redis plugin: expected *conf.Redis, got %T", c)
+	}
+	if err := ValidateAndSetDefaults(newConf); err != nil {
+		return fmt.Errorf("redis configuration validation failed: %w", err)
+	}
+	// Redis connections are created during startup; runtime Configure only updates the stored config
+	// and the new values take effect after the next managed restart.
+	r.conf = newConf
+	if r.rdb != nil {
+		log.Infof("redis configuration updated in memory; changes will apply on next restart")
+	}
 	return nil
 }
 

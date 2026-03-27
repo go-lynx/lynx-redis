@@ -141,6 +141,10 @@ func (m *mockRuntime) SetConfig(conf config.Config) {
 	// Mock implementation - do nothing
 }
 
+func (m *mockRuntime) Shutdown() {
+	// Mock implementation - do nothing
+}
+
 func (m *mockRuntime) GetConfig() config.Config {
 	// Mock implementation - return nil
 	return nil
