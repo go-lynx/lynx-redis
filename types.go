@@ -54,7 +54,5 @@ func (r *PlugRedis) HealthCheck() (bool, error) {
 }
 
 func (r *PlugRedis) PluginProtocol() plugins.PluginProtocol {
-	protocol := r.BasePlugin.PluginProtocol()
-	protocol.ConfigValidation = true
-	return protocol
+	return r.BasePlugin.PluginProtocol()
 }
