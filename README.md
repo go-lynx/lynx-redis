@@ -14,31 +14,64 @@ Note: Configuration is delivered through protobuf (`conf/redis.proto`), and the 
 - **Configuration Validation**: Complete configuration validation logic to ensure correctness and reasonableness
 
 ## Configuration Description (protobuf)
-See `plugins/nosql/redis/conf/redis.proto`, core fields as follows (maintaining original numbering, grouped by domain):
-- Basic Connection
-  - `network` (1): generally `tcp`
-  - `addrs` (12): address list, supports standalone/cluster/sentinel
-  - `username` (13), `password` (3), `db` (4), `client_name` (20)
-- Connection Pool/Lifecycle
-  - `min_idle_conns` (5)
-  - `max_idle_conns` (6) Note: go-redis doesn't use this value, only reserved
-  - `max_active_conns` (7) maps to go-redis `PoolSize`
-  - `conn_max_idle_time` (8)
-  - `idle_timeout` (15) Note: go-redis v9 no longer recommends, currently not mapped
-  - `max_conn_age` (16) Note: UniversalOptions has no such field, currently not mapped
-  - `pool_timeout` (14)
-- Timeouts
-  - `dial_timeout` (9), `read_timeout` (10), `write_timeout` (11)
-- Retry
-  - `max_retries` (17), `min_retry_backoff` (18), `max_retry_backoff` (19)
-- TLS
-  - `tls.enabled`, `tls.insecure_skip_verify`
-- Sentinel
-  - `sentinel.master_name`, `sentinel.addrs`
 
-Known Limitations:
-- `max_idle_conns` is currently not used by go-redis
-- `idle_timeout`, `max_conn_age` have no corresponding UniversalOptions fields, not effective (will be supplemented if switching to Options construction or extension later)
+See `conf/redis.proto`. All fields are grouped by domain below with their protobuf field number, Go type, default value, and a YAML example.
+
+### Basic Connection
+
+| Field | # | Type | Default | Example |
+|-------|---|------|---------|---------|
+| `network` | 1 | `string` | `"tcp"` | `tcp` |
+| `addrs` | 2 | `repeated string` | — (required) | `["127.0.0.1:6379"]` |
+| `username` | 3 | `string` | `""` | `myuser` |
+| `password` | 4 | `string` | `""` | `s3cr3t` |
+| `db` | 5 | `int32` | `0` | `0` |
+| `client_name` | 6 | `string` | `""` | `my-service` |
+
+### Connection Pool & Lifecycle
+
+| Field | # | Type | Default | Example |
+|-------|---|------|---------|---------|
+| `min_idle_conns` | 7 | `int32` | `0` (go-redis default) | `5` |
+| `max_idle_conns` | 8 | `int32` | `0` (go-redis default) | `10` |
+| `max_active_conns` | 9 | `int32` | `0` (CPU×10 per go-redis) | `50` |
+| `conn_max_idle_time` | 10 | `Duration` | not set (30 min in go-redis) | `{seconds: 300}` |
+| `pool_timeout` | 13 | `Duration` | not set | `{seconds: 2}` |
+| `conn_max_lifetime` | 22 | `Duration` | not set (0 = unlimited) | `{seconds: 3600}` |
+| `idle_timeout` _(deprecated)_ | 11 | `Duration` | alias of `conn_max_idle_time` | `{seconds: 300}` |
+| `max_conn_age` _(deprecated)_ | 12 | `Duration` | alias of `conn_max_lifetime` | `{seconds: 3600}` |
+
+> **Note**: `idle_timeout` and `max_conn_age` are retained only for backward compatibility. New configurations should use `conn_max_idle_time` and `conn_max_lifetime`. When both a field and its deprecated alias are set, they must carry the same duration value.
+
+### Timeouts
+
+| Field | # | Type | Default | Example |
+|-------|---|------|---------|---------|
+| `dial_timeout` | 14 | `Duration` | not set (go-redis default 5 s) | `{seconds: 5}` |
+| `read_timeout` | 15 | `Duration` | not set (go-redis default 3 s) | `{seconds: 3}` |
+| `write_timeout` | 16 | `Duration` | not set (go-redis default 3 s) | `{seconds: 3}` |
+
+### Retry
+
+| Field | # | Type | Default | Example |
+|-------|---|------|---------|---------|
+| `max_retries` | 17 | `int32` | `0` (no retry) | `3` |
+| `min_retry_backoff` | 18 | `Duration` | not set (8 ms in go-redis) | `{nanos: 8000000}` |
+| `max_retry_backoff` | 19 | `Duration` | not set (512 ms in go-redis) | `{nanos: 512000000}` |
+
+### TLS
+
+| Field | # | Type | Default | Example |
+|-------|---|------|---------|---------|
+| `tls.enabled` | 20.1 | `bool` | `false` | `true` |
+| `tls.insecure_skip_verify` | 20.2 | `bool` | `false` | `true` _(test env only)_ |
+
+### Sentinel Mode
+
+| Field | # | Type | Default | Example |
+|-------|---|------|---------|---------|
+| `sentinel.master_name` | 21.1 | `string` | `""` (required for sentinel) | `mymaster` |
+| `sentinel.addrs` | 21.2 | `repeated string` | `[]` (falls back to `addrs`) | `["10.0.0.10:26379"]` |
 
 ## Usage Examples
 
@@ -182,8 +215,10 @@ func useSingleClient() error {
         addrs: ["127.0.0.1:6379"]
       ```
   - `addr` has been removed, please use `addrs` instead (can configure single address)
-- `MaxConnAge` / `IdleTimeout` not effective
-  - Current go-redis UniversalOptions has no corresponding fields, not mapped (README has noted)
+- Legacy lifecycle field names
+  - `idle_timeout` now maps to `ConnMaxIdleTime`
+  - `max_conn_age` now maps to `ConnMaxLifetime`
+  - New configurations should prefer `conn_max_idle_time` and `conn_max_lifetime`
 
 ## Version and Compatibility
 - go-redis v9
@@ -192,4 +227,4 @@ func useSingleClient() error {
 
 ## Developer Tips
 - If further distinction between Cluster and Failover behavior is needed, can extend in `detectMode()` and `enhancedReadinessCheck()`
-- If switching to more granular clients later (Options/ClusterOptions/FailoverOptions), can supplement mapping of `max_conn_age`, `idle_timeout`
+- Deprecated aliases are normalized during validation, so old configs continue to work while new configs can move to the preferred lifecycle field names

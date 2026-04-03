@@ -3,6 +3,7 @@ package redis
 import (
 	"crypto/tls"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -43,11 +44,13 @@ func (r *PlugRedis) buildUniversalOptions() *redis.UniversalOptions {
 		Username:              r.conf.Username,
 		Password:              r.conf.Password,
 		MinIdleConns:          int(r.conf.MinIdleConns),
+		MaxIdleConns:          int(r.conf.MaxIdleConns),
 		PoolSize:              int(r.conf.MaxActiveConns),
+		MaxActiveConns:        int(r.conf.MaxActiveConns),
 		DialTimeout:           r.conf.DialTimeout.AsDuration(),
 		ReadTimeout:           r.conf.ReadTimeout.AsDuration(),
 		WriteTimeout:          r.conf.WriteTimeout.AsDuration(),
-		ConnMaxIdleTime:       r.conf.ConnMaxIdleTime.AsDuration(),
+		ConnMaxIdleTime:       r.effectiveConnMaxIdleTime(),
 		PoolTimeout:           r.conf.PoolTimeout.AsDuration(),
 		MaxRetries:            int(r.conf.MaxRetries),
 		MinRetryBackoff:       r.conf.MinRetryBackoff.AsDuration(),
@@ -55,6 +58,26 @@ func (r *PlugRedis) buildUniversalOptions() *redis.UniversalOptions {
 		ClientName:            r.conf.ClientName,
 		TLSConfig:             tlsConfig,
 		ContextTimeoutEnabled: true,
-		ConnMaxLifetime:       r.conf.MaxConnAge.AsDuration(), // Map MaxConnAge to ConnMaxLifetime
+		ConnMaxLifetime:       r.effectiveConnMaxLifetime(),
 	}
+}
+
+func (r *PlugRedis) effectiveConnMaxIdleTime() time.Duration {
+	if r.conf.ConnMaxIdleTime != nil {
+		return r.conf.ConnMaxIdleTime.AsDuration()
+	}
+	if r.conf.IdleTimeout != nil {
+		return r.conf.IdleTimeout.AsDuration()
+	}
+	return 0
+}
+
+func (r *PlugRedis) effectiveConnMaxLifetime() time.Duration {
+	if r.conf.ConnMaxLifetime != nil {
+		return r.conf.ConnMaxLifetime.AsDuration()
+	}
+	if r.conf.MaxConnAge != nil {
+		return r.conf.MaxConnAge.AsDuration()
+	}
+	return 0
 }

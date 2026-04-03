@@ -210,6 +210,7 @@ func (suite *RedisIntegrationTestSuite) SetupSuite() {
 		WriteTimeout:   durationpb.New(3 * time.Second),
 		PoolTimeout:    durationpb.New(4 * time.Second),
 		IdleTimeout:    durationpb.New(300 * time.Second),
+		MaxConnAge:     durationpb.New(10 * time.Minute),
 	}
 
 	suite.plugin.conf = config

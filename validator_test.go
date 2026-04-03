@@ -43,6 +43,30 @@ func TestValidateRedisConfig(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "legacy lifecycle aliases remain valid",
+			config: &conf.Redis{
+				Addrs:          []string{"localhost:6379"},
+				MinIdleConns:   5,
+				MaxActiveConns: 10,
+				IdleTimeout:    durationpb.New(30 * time.Second),
+				MaxConnAge:     durationpb.New(5 * time.Minute),
+			},
+			expected: true,
+		},
+		{
+			name: "conflicting lifecycle aliases are rejected",
+			config: &conf.Redis{
+				Addrs:           []string{"localhost:6379"},
+				MinIdleConns:    5,
+				MaxActiveConns:  10,
+				ConnMaxIdleTime: durationpb.New(30 * time.Second),
+				IdleTimeout:     durationpb.New(45 * time.Second),
+				ConnMaxLifetime: durationpb.New(5 * time.Minute),
+				MaxConnAge:      durationpb.New(6 * time.Minute),
+			},
+			expected: false,
+		},
+		{
 			name: "valid sentinel config",
 			config: &conf.Redis{
 				Addrs: []string{"sentinel1:26379", "sentinel2:26379"},
@@ -298,8 +322,8 @@ func TestSetDefaultValues(t *testing.T) {
 	if config.ConnMaxIdleTime == nil {
 		t.Error("Expected ConnMaxIdleTime to be set")
 	}
-	if config.MaxConnAge == nil {
-		t.Error("Expected MaxConnAge to be set")
+	if config.ConnMaxLifetime == nil {
+		t.Error("Expected ConnMaxLifetime to be set")
 	}
 	if config.MinRetryBackoff == nil {
 		t.Error("Expected MinRetryBackoff to be set")

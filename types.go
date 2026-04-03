@@ -52,7 +52,3 @@ func (r *PlugRedis) HealthCheck() (bool, error) {
 	err := r.CheckHealth()
 	return err == nil, err
 }
-
-func (r *PlugRedis) PluginProtocol() plugins.PluginProtocol {
-	return r.BasePlugin.PluginProtocol()
-}

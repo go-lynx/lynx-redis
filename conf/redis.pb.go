@@ -45,15 +45,19 @@ type Redis struct {
 	// —— Connection Pool and Connection Lifecycle ——
 	// Minimum idle connections in connection pool
 	MinIdleConns int32 `protobuf:"varint,7,opt,name=min_idle_conns,json=minIdleConns,proto3" json:"min_idle_conns,omitempty"`
-	// Maximum idle connections in connection pool
+	// Maximum idle connections in connection pool (maps to go-redis UniversalOptions.MaxIdleConns)
 	MaxIdleConns int32 `protobuf:"varint,8,opt,name=max_idle_conns,json=maxIdleConns,proto3" json:"max_idle_conns,omitempty"`
-	// Maximum active connections in connection pool (mapped to go-redis PoolSize)
+	// Maximum active connections in connection pool (maps to go-redis PoolSize and MaxActiveConns)
 	MaxActiveConns int32 `protobuf:"varint,9,opt,name=max_active_conns,json=maxActiveConns,proto3" json:"max_active_conns,omitempty"`
-	// Maximum idle time for connections
+	// Preferred maximum idle time for connections (maps to go-redis UniversalOptions.ConnMaxIdleTime)
 	ConnMaxIdleTime *durationpb.Duration `protobuf:"bytes,10,opt,name=conn_max_idle_time,json=connMaxIdleTime,proto3" json:"conn_max_idle_time,omitempty"`
-	// Connection idle timeout
+	// Deprecated compatibility alias of conn_max_idle_time
+	//
+	// Deprecated: Marked as deprecated in redis.proto.
 	IdleTimeout *durationpb.Duration `protobuf:"bytes,11,opt,name=idle_timeout,json=idleTimeout,proto3" json:"idle_timeout,omitempty"`
-	// Maximum connection lifetime
+	// Deprecated compatibility alias of conn_max_lifetime
+	//
+	// Deprecated: Marked as deprecated in redis.proto.
 	MaxConnAge *durationpb.Duration `protobuf:"bytes,12,opt,name=max_conn_age,json=maxConnAge,proto3" json:"max_conn_age,omitempty"`
 	// Wait timeout when all connections are busy (connection pool timeout)
 	PoolTimeout *durationpb.Duration `protobuf:"bytes,13,opt,name=pool_timeout,json=poolTimeout,proto3" json:"pool_timeout,omitempty"`
@@ -73,6 +77,8 @@ type Redis struct {
 	MaxRetryBackoff *durationpb.Duration `protobuf:"bytes,19,opt,name=max_retry_backoff,json=maxRetryBackoff,proto3" json:"max_retry_backoff,omitempty"`
 	Tls             *Redis_TLS           `protobuf:"bytes,20,opt,name=tls,proto3" json:"tls,omitempty"`
 	Sentinel        *Redis_Sentinel      `protobuf:"bytes,21,opt,name=sentinel,proto3" json:"sentinel,omitempty"`
+	// Preferred maximum connection lifetime (maps to go-redis UniversalOptions.ConnMaxLifetime)
+	ConnMaxLifetime *durationpb.Duration `protobuf:"bytes,22,opt,name=conn_max_lifetime,json=connMaxLifetime,proto3" json:"conn_max_lifetime,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -177,6 +183,7 @@ func (x *Redis) GetConnMaxIdleTime() *durationpb.Duration {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in redis.proto.
 func (x *Redis) GetIdleTimeout() *durationpb.Duration {
 	if x != nil {
 		return x.IdleTimeout
@@ -184,6 +191,7 @@ func (x *Redis) GetIdleTimeout() *durationpb.Duration {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in redis.proto.
 func (x *Redis) GetMaxConnAge() *durationpb.Duration {
 	if x != nil {
 		return x.MaxConnAge
@@ -250,6 +258,13 @@ func (x *Redis) GetTls() *Redis_TLS {
 func (x *Redis) GetSentinel() *Redis_Sentinel {
 	if x != nil {
 		return x.Sentinel
+	}
+	return nil
+}
+
+func (x *Redis) GetConnMaxLifetime() *durationpb.Duration {
+	if x != nil {
+		return x.ConnMaxLifetime
 	}
 	return nil
 }
@@ -368,7 +383,7 @@ var File_redis_proto protoreflect.FileDescriptor
 
 const file_redis_proto_rawDesc = "" +
 	"\n" +
-	"\vredis.proto\x12\x1alynx.protobuf.plugin.redis\x1a\x1egoogle/protobuf/duration.proto\"\x99\t\n" +
+	"\vredis.proto\x12\x1alynx.protobuf.plugin.redis\x1a\x1egoogle/protobuf/duration.proto\"\xe8\t\n" +
 	"\x05redis\x12\x18\n" +
 	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x14\n" +
 	"\x05addrs\x18\x02 \x03(\tR\x05addrs\x12\x1a\n" +
@@ -381,9 +396,9 @@ const file_redis_proto_rawDesc = "" +
 	"\x0emax_idle_conns\x18\b \x01(\x05R\fmaxIdleConns\x12(\n" +
 	"\x10max_active_conns\x18\t \x01(\x05R\x0emaxActiveConns\x12F\n" +
 	"\x12conn_max_idle_time\x18\n" +
-	" \x01(\v2\x19.google.protobuf.DurationR\x0fconnMaxIdleTime\x12<\n" +
-	"\fidle_timeout\x18\v \x01(\v2\x19.google.protobuf.DurationR\vidleTimeout\x12;\n" +
-	"\fmax_conn_age\x18\f \x01(\v2\x19.google.protobuf.DurationR\n" +
+	" \x01(\v2\x19.google.protobuf.DurationR\x0fconnMaxIdleTime\x12@\n" +
+	"\fidle_timeout\x18\v \x01(\v2\x19.google.protobuf.DurationB\x02\x18\x01R\vidleTimeout\x12?\n" +
+	"\fmax_conn_age\x18\f \x01(\v2\x19.google.protobuf.DurationB\x02\x18\x01R\n" +
 	"maxConnAge\x12<\n" +
 	"\fpool_timeout\x18\r \x01(\v2\x19.google.protobuf.DurationR\vpoolTimeout\x12<\n" +
 	"\fdial_timeout\x18\x0e \x01(\v2\x19.google.protobuf.DurationR\vdialTimeout\x12<\n" +
@@ -394,7 +409,8 @@ const file_redis_proto_rawDesc = "" +
 	"\x11min_retry_backoff\x18\x12 \x01(\v2\x19.google.protobuf.DurationR\x0fminRetryBackoff\x12E\n" +
 	"\x11max_retry_backoff\x18\x13 \x01(\v2\x19.google.protobuf.DurationR\x0fmaxRetryBackoff\x127\n" +
 	"\x03tls\x18\x14 \x01(\v2%.lynx.protobuf.plugin.redis.redis.TLSR\x03tls\x12F\n" +
-	"\bsentinel\x18\x15 \x01(\v2*.lynx.protobuf.plugin.redis.redis.SentinelR\bsentinel\x1aQ\n" +
+	"\bsentinel\x18\x15 \x01(\v2*.lynx.protobuf.plugin.redis.redis.SentinelR\bsentinel\x12E\n" +
+	"\x11conn_max_lifetime\x18\x16 \x01(\v2\x19.google.protobuf.DurationR\x0fconnMaxLifetime\x1aQ\n" +
 	"\x03TLS\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x120\n" +
 	"\x14insecure_skip_verify\x18\x02 \x01(\bR\x12insecureSkipVerify\x1aA\n" +
@@ -434,11 +450,12 @@ var file_redis_proto_depIdxs = []int32{
 	3,  // 8: lynx.protobuf.plugin.redis.redis.max_retry_backoff:type_name -> google.protobuf.Duration
 	1,  // 9: lynx.protobuf.plugin.redis.redis.tls:type_name -> lynx.protobuf.plugin.redis.redis.TLS
 	2,  // 10: lynx.protobuf.plugin.redis.redis.sentinel:type_name -> lynx.protobuf.plugin.redis.redis.Sentinel
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	3,  // 11: lynx.protobuf.plugin.redis.redis.conn_max_lifetime:type_name -> google.protobuf.Duration
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_redis_proto_init() }

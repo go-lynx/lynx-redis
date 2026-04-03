@@ -29,16 +29,16 @@ message redis {
   // —— Connection Pool and Connection Lifecycle ——
   // Minimum idle connections in connection pool
   int32 min_idle_conns = 7;
-  // Maximum idle connections in connection pool
+  // Maximum idle connections in connection pool (maps to go-redis UniversalOptions.MaxIdleConns)
   int32 max_idle_conns = 8;
-  // Maximum active connections in connection pool (mapped to go-redis PoolSize)
+  // Maximum active connections in connection pool (maps to go-redis PoolSize and MaxActiveConns)
   int32 max_active_conns = 9;
-  // Maximum idle time for connections
+  // Preferred maximum idle time for connections (maps to go-redis UniversalOptions.ConnMaxIdleTime)
   google.protobuf.Duration conn_max_idle_time = 10;
-  // Connection idle timeout
-  google.protobuf.Duration idle_timeout = 11;
-  // Maximum connection lifetime
-  google.protobuf.Duration max_conn_age = 12;
+  // Deprecated compatibility alias of conn_max_idle_time
+  google.protobuf.Duration idle_timeout = 11 [deprecated = true];
+  // Deprecated compatibility alias of conn_max_lifetime
+  google.protobuf.Duration max_conn_age = 12 [deprecated = true];
   // Wait timeout when all connections are busy (connection pool timeout)
   google.protobuf.Duration pool_timeout = 13;
 
@@ -75,4 +75,7 @@ message redis {
     repeated string addrs = 2;
   }
   Sentinel sentinel = 21;
+
+  // Preferred maximum connection lifetime (maps to go-redis UniversalOptions.ConnMaxLifetime)
+  google.protobuf.Duration conn_max_lifetime = 22;
 }

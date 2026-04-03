@@ -57,6 +57,8 @@ func ValidateRedisConfig(config *conf.Redis) *ValidationResult {
 		return result
 	}
 
+	normalizeLegacyLifecycleFields(config)
+
 	// Basic connection validation
 	validateBasicConnection(config, result)
 
@@ -85,6 +87,44 @@ func ValidateRedisConfig(config *conf.Redis) *ValidationResult {
 	validateNetworkConfig(config, result)
 
 	return result
+}
+
+func normalizeLegacyLifecycleFields(config *conf.Redis) {
+	if config == nil {
+		return
+	}
+	if config.ConnMaxIdleTime == nil && config.IdleTimeout != nil {
+		config.ConnMaxIdleTime = config.IdleTimeout
+	}
+	if config.ConnMaxLifetime == nil && config.MaxConnAge != nil {
+		config.ConnMaxLifetime = config.MaxConnAge
+	}
+}
+
+func effectiveConnMaxIdleTimeDuration(config *conf.Redis) (*durationpb.Duration, string) {
+	if config == nil {
+		return nil, ""
+	}
+	if config.ConnMaxIdleTime != nil {
+		return config.ConnMaxIdleTime, "conn_max_idle_time"
+	}
+	if config.IdleTimeout != nil {
+		return config.IdleTimeout, "idle_timeout"
+	}
+	return nil, ""
+}
+
+func effectiveConnMaxLifetimeDuration(config *conf.Redis) (*durationpb.Duration, string) {
+	if config == nil {
+		return nil, ""
+	}
+	if config.ConnMaxLifetime != nil {
+		return config.ConnMaxLifetime, "conn_max_lifetime"
+	}
+	if config.MaxConnAge != nil {
+		return config.MaxConnAge, "max_conn_age"
+	}
+	return nil, ""
 }
 
 // validateBasicConnection validates basic connection configuration
@@ -169,25 +209,35 @@ func validateConnectionPool(config *conf.Redis, result *ValidationResult) {
 		}
 	}
 
+	if config.ConnMaxIdleTime != nil && config.IdleTimeout != nil &&
+		config.ConnMaxIdleTime.AsDuration() != config.IdleTimeout.AsDuration() {
+		result.AddError("idle_timeout", "must match conn_max_idle_time when both are set")
+	}
+
+	if config.ConnMaxLifetime != nil && config.MaxConnAge != nil &&
+		config.ConnMaxLifetime.AsDuration() != config.MaxConnAge.AsDuration() {
+		result.AddError("max_conn_age", "must match conn_max_lifetime when both are set")
+	}
+
 	// Validate connection maximum idle time
-	if config.ConnMaxIdleTime != nil {
-		duration := config.ConnMaxIdleTime.AsDuration()
+	if durationValue, field := effectiveConnMaxIdleTimeDuration(config); durationValue != nil {
+		duration := durationValue.AsDuration()
 		if duration < 0 {
-			result.AddError("conn_max_idle_time", "cannot be negative")
+			result.AddError(field, "cannot be negative")
 		}
 		if duration > 24*time.Hour {
-			result.AddError("conn_max_idle_time", "cannot exceed 24 hours")
+			result.AddError(field, "cannot exceed 24 hours")
 		}
 	}
 
 	// Validate connection maximum lifetime
-	if config.MaxConnAge != nil {
-		duration := config.MaxConnAge.AsDuration()
+	if durationValue, field := effectiveConnMaxLifetimeDuration(config); durationValue != nil {
+		duration := durationValue.AsDuration()
 		if duration < 0 {
-			result.AddError("max_conn_age", "cannot be negative")
+			result.AddError(field, "cannot be negative")
 		}
 		if duration > 7*24*time.Hour {
-			result.AddError("max_conn_age", "cannot exceed 7 days")
+			result.AddError(field, "cannot exceed 7 days")
 		}
 	}
 
@@ -421,6 +471,8 @@ func ValidateAndSetDefaults(config *conf.Redis) error {
 
 // setDefaultValues sets default values
 func setDefaultValues(config *conf.Redis) {
+	normalizeLegacyLifecycleFields(config)
+
 	// Network type default value
 	if config.Network == "" {
 		config.Network = "tcp"
@@ -457,8 +509,8 @@ func setDefaultValues(config *conf.Redis) {
 	if config.ConnMaxIdleTime == nil {
 		config.ConnMaxIdleTime = durationpb.New(10 * time.Second)
 	}
-	if config.MaxConnAge == nil {
-		config.MaxConnAge = durationpb.New(30 * time.Minute)
+	if config.ConnMaxLifetime == nil {
+		config.ConnMaxLifetime = durationpb.New(30 * time.Minute)
 	}
 
 	// Retry configuration default values
@@ -616,7 +668,7 @@ func (rcv *RedisConfigValidator) registerDefaultValues() {
 	rcv.defaultSetter.SetDefaultFunc("ConnMaxIdleTime", func(interface{}) interface{} {
 		return durationpb.New(30 * time.Minute)
 	})
-	rcv.defaultSetter.SetDefaultFunc("MaxConnAge", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("ConnMaxLifetime", func(interface{}) interface{} {
 		return durationpb.New(0) // 0 means no limit
 	})
 
@@ -638,6 +690,8 @@ func (rcv *RedisConfigValidator) registerDefaultValues() {
 
 // ValidateRedisConfigWithFramework validates Redis configuration using the new framework
 func (rcv *RedisConfigValidator) ValidateRedisConfigWithFramework(cfg *conf.Redis) *config.ValidationResult {
+	normalizeLegacyLifecycleFields(cfg)
+
 	// Apply defaults first
 	if err := rcv.defaultSetter.ApplyDefaults(cfg); err != nil {
 		result := &config.ValidationResult{Valid: false}

@@ -56,7 +56,8 @@ max_active_conns: 20  # Minimum cannot be greater than maximum
 
 #### Connection Lifecycle
 - `ConnMaxIdleTime`: 0-24 hours
-- `MaxConnAge`: 0-7 days
+- `ConnMaxLifetime`: 0-7 days
+- `idle_timeout` and `max_conn_age` are deprecated aliases; if they are set together with the preferred fields, both sides must use the same duration
 - `PoolTimeout`: 0-30 seconds
 
 ### 3. Timeout Configuration Validation
@@ -174,7 +175,7 @@ PoolTimeout: 3s
 
 // Connection lifecycle
 ConnMaxIdleTime: 10s
-MaxConnAge: 30m
+ConnMaxLifetime: 30m
 
 // Retry configuration
 MaxRetries: 3
