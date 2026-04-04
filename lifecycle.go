@@ -73,18 +73,7 @@ func (r *PlugRedis) StartupTasks() error {
 	mode := r.detectMode()
 	log.Infof("redis client successfully started, mode=%s, addrs=%v, ping_latency=%s", mode, r.currentAddrList(), latency)
 
-	if r.rt != nil {
-		// Keep the legacy shared alias for existing plugins while also publishing the stable plugin name.
-		for _, resourceName := range []string{"redis", pluginName} {
-			if err := r.rt.RegisterSharedResource(resourceName, r.rdb); err != nil {
-				log.Warnf("failed to register redis shared resource %s: %v", resourceName, err)
-			}
-		}
-		// Publish a plugin-scoped handle for future internal consumers that should not use global shared names.
-		if err := r.rt.RegisterPrivateResource("client", r.rdb); err != nil {
-			log.Warnf("failed to register redis private client resource: %v", err)
-		}
-	}
+	r.publishResourceContract()
 
 	// Perform enhanced check at startup stage
 	r.enhancedReadinessCheck(mode)

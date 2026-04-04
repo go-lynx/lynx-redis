@@ -1,7 +1,8 @@
 package redis
 
 import (
-	"github.com/go-lynx/lynx"
+	"context"
+
 	"github.com/go-lynx/lynx/pkg/factory"
 	"github.com/go-lynx/lynx/plugins"
 	"github.com/redis/go-redis/v9"
@@ -25,44 +26,26 @@ func init() {
 // finally converts the plugin instance to *PlugRedis type and returns its rdb field, which is the Redis client.
 // GetRedis returns the underlying *redis.Client, only available in single node mode; returns nil for Cluster/Sentinel.
 func GetRedis() *redis.Client {
-	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
-	if plugin == nil {
+	client, err := GetProvider().SingleClient(context.Background())
+	if err != nil {
 		return nil
 	}
-	// Use reflection or interface to avoid package path issues
-	// First try direct type assertion
-	if plugRedis, ok := plugin.(*PlugRedis); ok {
-		if c, ok := plugRedis.rdb.(*redis.Client); ok {
-			return c
-		}
-		return nil
-	}
-	// If direct assertion fails, try using GetUniversalRedis and check type
-	universalClient := GetUniversalRedis()
-	if universalClient == nil {
-		return nil
-	}
-	if c, ok := universalClient.(*redis.Client); ok {
-		return c
-	}
-	return nil
+	return client
 }
 
 // GetUniversalRedis returns the universal client, usable for single node/cluster/sentinel modes.
 func GetUniversalRedis() redis.UniversalClient {
-	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
-	if plugin == nil {
+	client, err := GetProvider().UniversalClient(context.Background())
+	if err != nil {
 		return nil
 	}
-	// Try direct type assertion first
-	if plugRedis, ok := plugin.(*PlugRedis); ok {
-		return plugRedis.rdb
+	return client
+}
+
+// GetUniversalClient returns the current universal redis client for the plugin instance.
+func (r *PlugRedis) GetUniversalClient() redis.UniversalClient {
+	if r == nil {
+		return nil
 	}
-	// If direct assertion fails, try using interface method
-	if plugRedis, ok := plugin.(interface {
-		GetUniversalClient() redis.UniversalClient
-	}); ok {
-		return plugRedis.GetUniversalClient()
-	}
-	return nil
+	return r.rdb
 }
