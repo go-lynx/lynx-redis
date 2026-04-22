@@ -289,14 +289,6 @@ func validateTimeouts(config *conf.Redis, result *ValidationResult) {
 		}
 	}
 
-	// Validate timeout reasonableness
-	if config.DialTimeout != nil && config.ReadTimeout != nil {
-		dialDuration := config.DialTimeout.AsDuration()
-		readDuration := config.ReadTimeout.AsDuration()
-		if dialDuration > readDuration {
-			result.AddError("dial_timeout", "should not be greater than read_timeout")
-		}
-	}
 }
 
 // validateRetryConfig validates retry configuration

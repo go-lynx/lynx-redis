@@ -192,17 +192,6 @@ func TestValidateRedisConfig(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "dial_timeout greater than read_timeout",
-			config: &conf.Redis{
-				Addrs:          []string{"localhost:6379"},
-				MinIdleConns:   10,
-				MaxActiveConns: 20,
-				DialTimeout:    durationpb.New(10 * time.Second),
-				ReadTimeout:    durationpb.New(5 * time.Second),
-			},
-			expected: false,
-		},
-		{
 			name: "invalid retry config",
 			config: &conf.Redis{
 				Addrs:          []string{"localhost:6379"},

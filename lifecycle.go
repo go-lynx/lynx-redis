@@ -20,13 +20,17 @@ func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
 		return err
 	}
 	r.rt = rt
-	// Initialize an empty configuration structure
-	r.conf = &conf.Redis{}
 
-	// Scan and load Redis configuration from runtime config
-	err := rt.GetConfig().Value(confPrefix).Scan(r.conf)
-	if err != nil {
-		return err
+	// Scan config from runtime only when not pre-set (e.g. in tests)
+	if r.conf == nil {
+		r.conf = &conf.Redis{}
+		runtimeConf := rt.GetConfig()
+		if runtimeConf == nil {
+			return fmt.Errorf("redis plugin requires a runtime config but none was provided")
+		}
+		if err := runtimeConf.Value(confPrefix).Scan(r.conf); err != nil {
+			return err
+		}
 	}
 
 	// Validate configuration and set default values
