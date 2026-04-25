@@ -19,24 +19,30 @@ func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
 	if err := r.BasePlugin.InitializeResources(rt); err != nil {
 		return err
 	}
+	r.mu.Lock()
 	r.rt = rt
+	cfg := r.conf
+	r.mu.Unlock()
 
 	// Scan config from runtime only when not pre-set (e.g. in tests)
-	if r.conf == nil {
-		r.conf = &conf.Redis{}
+	if cfg == nil {
+		cfg = &conf.Redis{}
 		runtimeConf := rt.GetConfig()
 		if runtimeConf == nil {
 			return fmt.Errorf("redis plugin requires a runtime config but none was provided")
 		}
-		if err := runtimeConf.Value(confPrefix).Scan(r.conf); err != nil {
+		if err := runtimeConf.Value(confPrefix).Scan(cfg); err != nil {
 			return err
 		}
 	}
 
 	// Validate configuration and set default values
-	if err := ValidateAndSetDefaults(r.conf); err != nil {
+	if err := ValidateAndSetDefaults(cfg); err != nil {
 		return fmt.Errorf("redis configuration validation failed: %w", err)
 	}
+	r.mu.Lock()
+	r.conf = cfg
+	r.mu.Unlock()
 
 	return nil
 }
@@ -44,6 +50,13 @@ func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
 // StartupTasks starts Redis client and performs health check
 // Returns error information, returns corresponding error if startup or health check fails
 func (r *PlugRedis) StartupTasks() error {
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+
+	if r.getClient() != nil {
+		return fmt.Errorf("redis client already started")
+	}
+
 	// Log Redis client startup
 	log.Infof("starting redis client")
 
@@ -51,27 +64,30 @@ func (r *PlugRedis) StartupTasks() error {
 	redisStartupTotal.Inc()
 
 	// Create Redis universal client (supports single node/cluster/sentinel)
-	r.rdb = redis.NewUniversalClient(r.buildUniversalOptions())
+	client := redis.NewUniversalClient(r.buildUniversalOptions())
 
 	// Register command-level metrics hook
-	r.rdb.AddHook(metricsHook{})
-
-	// Initialize collector channel
-	r.statsQuit = make(chan struct{})
+	client.AddHook(metricsHook{})
 
 	// Perform quick health check at startup (short timeout)
 	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	start := time.Now()
-	_, err := r.rdb.Ping(pingCtx).Result()
+	_, err := client.Ping(pingCtx).Result()
 	cancel()
 	if err != nil {
-		// Startup failure requires complete rollback of all resources
-		r.cleanupOnStartupFailure()
+		if closeErr := client.Close(); closeErr != nil {
+			log.Warnf("failed to close redis client during startup cleanup: %v", closeErr)
+		}
 		redisStartupFailedTotal.Inc()
 		return fmt.Errorf("redis ping failed during startup: %w", err)
 	}
 	latency := time.Since(start)
 	redisPingLatency.Observe(latency.Seconds())
+
+	r.mu.Lock()
+	r.rdb = client
+	r.statsQuit = make(chan struct{})
+	r.mu.Unlock()
 
 	// Determine mode (single node/cluster/sentinel)
 	mode := r.detectMode()
@@ -92,17 +108,21 @@ func (r *PlugRedis) StartupTasks() error {
 // cleanupOnStartupFailure cleans up resources on startup failure
 func (r *PlugRedis) cleanupOnStartupFailure() {
 	// Close Redis client
-	if r.rdb != nil {
-		if err := r.rdb.Close(); err != nil {
+	client := r.getClient()
+	if client != nil {
+		if err := client.Close(); err != nil {
 			log.Warnf("failed to close redis client during startup cleanup: %v", err)
 		}
-		r.rdb = nil
+		r.setClient(nil)
 	}
 
 	// Clean up collector channel
-	if r.statsQuit != nil {
-		close(r.statsQuit)
-		r.statsQuit = nil
+	r.mu.Lock()
+	statsQuit := r.statsQuit
+	r.statsQuit = nil
+	r.mu.Unlock()
+	if statsQuit != nil {
+		close(statsQuit)
 	}
 
 	// Wait for potentially started goroutines to exit
@@ -123,21 +143,24 @@ func (r *PlugRedis) cleanupOnStartupFailure() {
 // CleanupTasks closes Redis client
 // Returns error information, returns corresponding error if client closing fails
 func (r *PlugRedis) CleanupTasks() error {
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+
 	// If Redis client is not initialized, return nil directly
-	if r.rdb == nil {
+	r.mu.Lock()
+	client := r.rdb
+	statsQuit := r.statsQuit
+	r.rdb = nil
+	r.statsQuit = nil
+	r.mu.Unlock()
+
+	if client == nil {
 		return nil
 	}
 
 	// Stop collectors
-	if r.statsQuit != nil {
-		// Safely close channel to avoid duplicate closing
-		select {
-		case <-r.statsQuit:
-			// Channel already closed
-		default:
-			close(r.statsQuit)
-		}
-
+	if statsQuit != nil {
+		close(statsQuit)
 		// Wait for all collector goroutines to exit, set timeout to avoid infinite waiting
 		done := make(chan struct{})
 		go func() {
@@ -154,7 +177,7 @@ func (r *PlugRedis) CleanupTasks() error {
 	}
 
 	// Close Redis client
-	if err := r.rdb.Close(); err != nil {
+	if err := client.Close(); err != nil {
 		// Return error with plugin information
 		return plugins.NewPluginError(r.ID(), "Stop", "Failed to stop Redis client", err)
 	}
@@ -165,6 +188,9 @@ func (r *PlugRedis) CleanupTasks() error {
 // Parameter c should be a pointer to a conf.Redis structure, containing new configuration information
 // Returns error information, returns corresponding error if configuration update fails
 func (r *PlugRedis) Configure(c any) error {
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+
 	// If the incoming configuration is nil, return nil directly
 	if c == nil {
 		return nil
@@ -178,8 +204,11 @@ func (r *PlugRedis) Configure(c any) error {
 	}
 	// Redis connections are created during startup; runtime Configure only updates the stored config
 	// and the new values take effect after the next managed restart.
+	r.mu.Lock()
 	r.conf = newConf
-	if r.rdb != nil {
+	running := r.rdb != nil
+	r.mu.Unlock()
+	if running {
 		log.Infof("redis configuration updated in memory; changes will apply on next restart")
 	}
 	return nil
@@ -190,6 +219,11 @@ func (r *PlugRedis) Configure(c any) error {
 // Parameter report is a pointer to the health report, used to record health check results
 // Returns error information, returns corresponding error if health check fails
 func (r *PlugRedis) CheckHealth() error {
+	client := r.getClient()
+	if client == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
+
 	// Perform health check with fixed short timeout to avoid being affected by idle connection configuration
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	// Ensure context is cancelled at the end of the function
@@ -197,7 +231,7 @@ func (r *PlugRedis) CheckHealth() error {
 
 	// Execute Redis client Ping operation for health check
 	start := time.Now()
-	_, err := r.rdb.Ping(ctx).Result()
+	_, err := client.Ping(ctx).Result()
 	latency := time.Since(start)
 	redisPingLatency.Observe(latency.Seconds())
 	log.Infof("redis health check: addrs=%v, ping_latency=%s", r.currentAddrList(), latency)

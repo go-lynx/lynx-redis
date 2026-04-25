@@ -480,10 +480,10 @@ func (suite *RedisIntegrationTestSuite) TestConnectionPoolMetrics() {
 	assert.NotNil(suite.T(), stats)
 
 	// Validate metrics
-	assert.GreaterOrEqual(suite.T(), stats.TotalConns, uint32(0))
-	assert.GreaterOrEqual(suite.T(), stats.IdleConns, uint32(0))
-	assert.GreaterOrEqual(suite.T(), stats.Hits, uint64(0))
-	assert.GreaterOrEqual(suite.T(), stats.Timeouts, uint64(0))
+	assert.GreaterOrEqual(suite.T(), uint32(stats.TotalConns), uint32(0))
+	assert.GreaterOrEqual(suite.T(), uint32(stats.IdleConns), uint32(0))
+	assert.GreaterOrEqual(suite.T(), uint64(stats.Hits), uint64(0))
+	assert.GreaterOrEqual(suite.T(), uint64(stats.Timeouts), uint64(0))
 }
 
 // TestHealthCheck tests health check

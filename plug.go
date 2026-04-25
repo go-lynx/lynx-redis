@@ -44,8 +44,5 @@ func GetUniversalRedis() redis.UniversalClient {
 
 // GetUniversalClient returns the current universal redis client for the plugin instance.
 func (r *PlugRedis) GetUniversalClient() redis.UniversalClient {
-	if r == nil {
-		return nil
-	}
-	return r.rdb
+	return r.getClient()
 }

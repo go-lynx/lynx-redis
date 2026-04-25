@@ -8,9 +8,13 @@ import (
 
 // startPoolStatsCollector periodically collects PoolStats and reports to Prometheus
 func (r *PlugRedis) startPoolStatsCollector() {
+	r.mu.Lock()
 	if r.statsQuit == nil {
 		r.statsQuit = make(chan struct{})
 	}
+	quit := r.statsQuit
+	r.mu.Unlock()
+
 	r.statsWG.Add(1)
 	go func() {
 		defer r.statsWG.Done()
@@ -18,7 +22,7 @@ func (r *PlugRedis) startPoolStatsCollector() {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-r.statsQuit:
+			case <-quit:
 				return
 			case <-ticker.C:
 				r.observePoolStats()
@@ -30,11 +34,12 @@ func (r *PlugRedis) startPoolStatsCollector() {
 }
 
 func (r *PlugRedis) observePoolStats() {
-	if r.rdb == nil {
+	client := r.getClient()
+	if client == nil {
 		return
 	}
 	// Compatible with different client types
-	switch c := r.rdb.(type) {
+	switch c := client.(type) {
 	case *redis.Client:
 		ps := c.PoolStats()
 		r.setPoolStats(ps)
@@ -47,7 +52,7 @@ func (r *PlugRedis) observePoolStats() {
 	default:
 		// Try interface assertion (some versions of UniversalClient may directly implement PoolStats method)
 		type poolStater interface{ PoolStats() *redis.PoolStats }
-		if pc, ok := any(r.rdb).(poolStater); ok {
+		if pc, ok := any(client).(poolStater); ok {
 			r.setPoolStats(pc.PoolStats())
 		}
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-lynx/lynx-redis/conf"
 	"github.com/go-lynx/lynx/pkg/config"
+	"github.com/go-lynx/lynx/pkg/security"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -340,8 +341,9 @@ func validateTLSConfig(config *conf.Redis, result *ValidationResult) {
 
 	// If TLS is enabled, check if addresses support TLS
 	if config.Tls.Enabled {
-		// reference result to avoid unused parameter warning in this validation stub
-		_ = result
+		if err := security.ValidateTLSProductionPolicy("redis", true, config.Tls.InsecureSkipVerify); err != nil {
+			result.AddError("tls.insecure_skip_verify", err.Error())
+		}
 		hasTLSSupport := false
 		for _, addr := range config.Addrs {
 			if strings.HasPrefix(strings.ToLower(addr), "rediss://") {

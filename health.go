@@ -12,7 +12,11 @@ import (
 
 // detectMode returns single/cluster/sentinel
 func (r *PlugRedis) detectMode() string {
-	if r.conf.Sentinel != nil && r.conf.Sentinel.MasterName != "" {
+	cfg := r.getConfig()
+	if cfg == nil {
+		return "unknown"
+	}
+	if cfg.Sentinel != nil && cfg.Sentinel.MasterName != "" {
 		return "sentinel"
 	}
 	addrList := r.currentAddrList()
@@ -23,20 +27,28 @@ func (r *PlugRedis) detectMode() string {
 }
 
 func (r *PlugRedis) currentAddrList() []string {
-	if r.conf.Sentinel != nil && len(r.conf.Sentinel.Addrs) > 0 {
-		return append([]string{}, r.conf.Sentinel.Addrs...)
+	cfg := r.getConfig()
+	if cfg == nil {
+		return nil
 	}
-	if len(r.conf.Addrs) > 0 {
-		return append([]string{}, r.conf.Addrs...)
+	if cfg.Sentinel != nil && len(cfg.Sentinel.Addrs) > 0 {
+		return append([]string{}, cfg.Sentinel.Addrs...)
+	}
+	if len(cfg.Addrs) > 0 {
+		return append([]string{}, cfg.Addrs...)
 	}
 	return nil
 }
 
 // enhancedReadinessCheck performs stricter readiness checks based on mode
 func (r *PlugRedis) enhancedReadinessCheck(mode string) {
+	client := r.getClient()
+	if client == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	switch c := r.rdb.(type) {
+	switch c := client.(type) {
 	case *redis.ClusterClient:
 		info, err := c.Info(ctx, "cluster").Result()
 		if err == nil && strings.Contains(info, "cluster_state:ok") {
@@ -52,7 +64,7 @@ func (r *PlugRedis) enhancedReadinessCheck(mode string) {
 		}
 	default:
 		// Single node/Sentinel: read INFO replication to determine role
-		info, err := r.rdb.Info(ctx, "replication").Result()
+		info, err := client.Info(ctx, "replication").Result()
 		if err == nil {
 			if strings.Contains(info, "role:master") {
 				redisIsMaster.Set(1)
@@ -75,13 +87,21 @@ func (r *PlugRedis) enhancedReadinessCheck(mode string) {
 	}
 	// Write server_info metrics once
 	version := r.readRedisVersion()
-	redisServerInfo.WithLabelValues(version, mode, r.conf.ClientName).Set(1)
+	clientName := ""
+	if cfg := r.getConfig(); cfg != nil {
+		clientName = cfg.ClientName
+	}
+	redisServerInfo.WithLabelValues(version, mode, clientName).Set(1)
 }
 
 func (r *PlugRedis) readRedisVersion() string {
+	client := r.getClient()
+	if client == nil {
+		return "unknown"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	info, err := r.rdb.Info(ctx, "server").Result()
+	info, err := client.Info(ctx, "server").Result()
 	if err != nil {
 		return "unknown"
 	}
@@ -101,8 +121,13 @@ func (r *PlugRedis) readRedisVersion() string {
 
 // startInfoCollector periodically collects INFO and cluster status
 func (r *PlugRedis) startInfoCollector(mode string) {
-	r.statsWG.Add(1)
+	r.mu.RLock()
 	quit := r.statsQuit
+	r.mu.RUnlock()
+	if quit == nil {
+		return
+	}
+	r.statsWG.Add(1)
 	go func() {
 		defer r.statsWG.Done()
 		ticker := time.NewTicker(30 * time.Second)
@@ -132,7 +157,8 @@ type HealthStatus struct {
 
 // GetHealthStatus get detailed health status
 func (r *PlugRedis) GetHealthStatus(ctx context.Context) *HealthStatus {
-	if r.rdb == nil {
+	client := r.getClient()
+	if client == nil {
 		return &HealthStatus{
 			Healthy: false,
 			Error:   "redis client not initialized",
@@ -145,7 +171,7 @@ func (r *PlugRedis) GetHealthStatus(ctx context.Context) *HealthStatus {
 
 	// Ping test
 	start := time.Now()
-	if _, err := r.rdb.Ping(ctx).Result(); err != nil {
+	if _, err := client.Ping(ctx).Result(); err != nil {
 		status.Healthy = false
 		status.Error = err.Error()
 		return status
@@ -163,11 +189,11 @@ func (r *PlugRedis) GetHealthStatus(ctx context.Context) *HealthStatus {
 	// }
 
 	// Get master-slave status
-	info, _ := r.rdb.Info(ctx, "replication").Result()
+	info, _ := client.Info(ctx, "replication").Result()
 	status.IsMaster = strings.Contains(info, "role:master")
 
 	// Cluster status
-	if clusterClient, ok := r.rdb.(*redis.ClusterClient); ok {
+	if clusterClient, ok := client.(*redis.ClusterClient); ok {
 		clusterInfo, _ := clusterClient.Info(ctx, "cluster").Result()
 		status.ClusterOK = strings.Contains(clusterInfo, "cluster_state:ok")
 	}
@@ -188,14 +214,15 @@ type PerformanceMetrics struct {
 
 // GetPerformanceMetrics get performance metrics
 func (r *PlugRedis) GetPerformanceMetrics(ctx context.Context) (*PerformanceMetrics, error) {
-	if r.rdb == nil {
+	client := r.getClient()
+	if client == nil {
 		return nil, fmt.Errorf("redis client not initialized")
 	}
 
 	metrics := &PerformanceMetrics{}
 
 	// Get statistics information
-	info, err := r.rdb.Info(ctx, "stats").Result()
+	info, err := client.Info(ctx, "stats").Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stats: %w", err)
 	}
@@ -220,11 +247,11 @@ func (r *PlugRedis) GetPerformanceMetrics(ctx context.Context) (*PerformanceMetr
 	metrics.EvictedKeys = parseIntFromInfo(info, "evicted_keys")
 
 	// Get memory information
-	memInfo, _ := r.rdb.Info(ctx, "memory").Result()
+	memInfo, _ := client.Info(ctx, "memory").Result()
 	metrics.UsedMemory = parseIntFromInfo(memInfo, "used_memory")
 
 	// Get client connection count
-	clientInfo, _ := r.rdb.Info(ctx, "clients").Result()
+	clientInfo, _ := client.Info(ctx, "clients").Result()
 	metrics.ConnectedClients = int(parseIntFromInfo(clientInfo, "connected_clients"))
 
 	// Calculate hit rate

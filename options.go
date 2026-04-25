@@ -5,20 +5,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-lynx/lynx-redis/conf"
 	"github.com/redis/go-redis/v9"
 )
 
 // buildUniversalOptions builds redis.UniversalOptions based on configuration
 func (r *PlugRedis) buildUniversalOptions() *redis.UniversalOptions {
+	cfg := r.getConfig()
+	if cfg == nil {
+		cfg = &conf.Redis{}
+	}
 	// Parse addresses: prioritize addrs; fallback to addr if empty (supports comma separation)
 	var addrs []string
-	if len(r.conf.Addrs) > 0 {
-		addrs = append(addrs, r.conf.Addrs...)
+	if len(cfg.Addrs) > 0 {
+		addrs = append(addrs, cfg.Addrs...)
 	}
 	// TLS: configuration priority; then rediss:// inference
 	var tlsConfig *tls.Config
-	if r.conf.Tls != nil && r.conf.Tls.Enabled {
-		tlsConfig = &tls.Config{InsecureSkipVerify: r.conf.Tls.InsecureSkipVerify}
+	if cfg.Tls != nil && cfg.Tls.Enabled {
+		tlsConfig = &tls.Config{InsecureSkipVerify: cfg.Tls.InsecureSkipVerify}
 	}
 	for i := range addrs {
 		if strings.HasPrefix(strings.ToLower(addrs[i]), "rediss://") {
@@ -30,54 +35,54 @@ func (r *PlugRedis) buildUniversalOptions() *redis.UniversalOptions {
 	}
 	// Sentinel: allow dedicated sentinel address override
 	masterName := ""
-	if r.conf.Sentinel != nil {
-		masterName = r.conf.Sentinel.MasterName
-		if len(r.conf.Sentinel.Addrs) > 0 {
-			addrs = append([]string{}, r.conf.Sentinel.Addrs...)
+	if cfg.Sentinel != nil {
+		masterName = cfg.Sentinel.MasterName
+		if len(cfg.Sentinel.Addrs) > 0 {
+			addrs = append([]string{}, cfg.Sentinel.Addrs...)
 		}
 	}
 
 	return &redis.UniversalOptions{
 		Addrs:                 addrs,
 		MasterName:            masterName,
-		DB:                    int(r.conf.Db),
-		Username:              r.conf.Username,
-		Password:              r.conf.Password,
-		MinIdleConns:          int(r.conf.MinIdleConns),
-		MaxIdleConns:          int(r.conf.MaxIdleConns),
-		PoolSize:              int(r.conf.MaxActiveConns),
-		MaxActiveConns:        int(r.conf.MaxActiveConns),
-		DialTimeout:           r.conf.DialTimeout.AsDuration(),
-		ReadTimeout:           r.conf.ReadTimeout.AsDuration(),
-		WriteTimeout:          r.conf.WriteTimeout.AsDuration(),
-		ConnMaxIdleTime:       r.effectiveConnMaxIdleTime(),
-		PoolTimeout:           r.conf.PoolTimeout.AsDuration(),
-		MaxRetries:            int(r.conf.MaxRetries),
-		MinRetryBackoff:       r.conf.MinRetryBackoff.AsDuration(),
-		MaxRetryBackoff:       r.conf.MaxRetryBackoff.AsDuration(),
-		ClientName:            r.conf.ClientName,
+		DB:                    int(cfg.Db),
+		Username:              cfg.Username,
+		Password:              cfg.Password,
+		MinIdleConns:          int(cfg.MinIdleConns),
+		MaxIdleConns:          int(cfg.MaxIdleConns),
+		PoolSize:              int(cfg.MaxActiveConns),
+		MaxActiveConns:        int(cfg.MaxActiveConns),
+		DialTimeout:           cfg.DialTimeout.AsDuration(),
+		ReadTimeout:           cfg.ReadTimeout.AsDuration(),
+		WriteTimeout:          cfg.WriteTimeout.AsDuration(),
+		ConnMaxIdleTime:       effectiveConnMaxIdleTime(cfg),
+		PoolTimeout:           cfg.PoolTimeout.AsDuration(),
+		MaxRetries:            int(cfg.MaxRetries),
+		MinRetryBackoff:       cfg.MinRetryBackoff.AsDuration(),
+		MaxRetryBackoff:       cfg.MaxRetryBackoff.AsDuration(),
+		ClientName:            cfg.ClientName,
 		TLSConfig:             tlsConfig,
 		ContextTimeoutEnabled: true,
-		ConnMaxLifetime:       r.effectiveConnMaxLifetime(),
+		ConnMaxLifetime:       effectiveConnMaxLifetime(cfg),
 	}
 }
 
-func (r *PlugRedis) effectiveConnMaxIdleTime() time.Duration {
-	if r.conf.ConnMaxIdleTime != nil {
-		return r.conf.ConnMaxIdleTime.AsDuration()
+func effectiveConnMaxIdleTime(cfg *conf.Redis) time.Duration {
+	if cfg.ConnMaxIdleTime != nil {
+		return cfg.ConnMaxIdleTime.AsDuration()
 	}
-	if r.conf.IdleTimeout != nil {
-		return r.conf.IdleTimeout.AsDuration()
+	if cfg.IdleTimeout != nil {
+		return cfg.IdleTimeout.AsDuration()
 	}
 	return 0
 }
 
-func (r *PlugRedis) effectiveConnMaxLifetime() time.Duration {
-	if r.conf.ConnMaxLifetime != nil {
-		return r.conf.ConnMaxLifetime.AsDuration()
+func effectiveConnMaxLifetime(cfg *conf.Redis) time.Duration {
+	if cfg.ConnMaxLifetime != nil {
+		return cfg.ConnMaxLifetime.AsDuration()
 	}
-	if r.conf.MaxConnAge != nil {
-		return r.conf.MaxConnAge.AsDuration()
+	if cfg.MaxConnAge != nil {
+		return cfg.MaxConnAge.AsDuration()
 	}
 	return 0
 }

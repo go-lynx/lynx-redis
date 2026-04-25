@@ -63,10 +63,11 @@ func (provider) UniversalClient(ctx context.Context) (goredis.UniversalClient, e
 	if err != nil {
 		return nil, err
 	}
-	if plugin.rdb == nil {
+	client := plugin.getClient()
+	if client == nil {
 		return nil, fmt.Errorf("redis client is nil")
 	}
-	return plugin.rdb, nil
+	return client, nil
 }
 
 func (p provider) SingleClient(ctx context.Context) (*goredis.Client, error) {
@@ -90,30 +91,32 @@ func (p provider) Mode(ctx context.Context) (string, error) {
 }
 
 func (r *PlugRedis) publishResourceContract() {
-	if r == nil || r.rt == nil || r.rdb == nil {
+	client := r.getClient()
+	rt := r.getRuntime()
+	if r == nil || rt == nil || client == nil {
 		return
 	}
 
 	redisProvider := GetProvider()
 	// Keep legacy raw-client shared resources for existing plugins while publishing the stable provider resource.
 	for _, resourceName := range []string{legacySharedResourceName, pluginName} {
-		if err := r.rt.RegisterSharedResource(resourceName, r.rdb); err != nil {
+		if err := rt.RegisterSharedResource(resourceName, client); err != nil {
 			log.Warnf("failed to register redis shared resource %s: %v", resourceName, err)
 		}
 	}
 	for _, resourceName := range []string{"redis.provider", sharedProviderResourceName} {
-		if err := r.rt.RegisterSharedResource(resourceName, redisProvider); err != nil {
+		if err := rt.RegisterSharedResource(resourceName, redisProvider); err != nil {
 			log.Warnf("failed to register redis provider resource %s: %v", resourceName, err)
 		}
 	}
-	if err := r.rt.RegisterPrivateResource(privateClientResourceName, r.rdb); err != nil {
+	if err := rt.RegisterPrivateResource(privateClientResourceName, client); err != nil {
 		log.Warnf("failed to register redis private client resource: %v", err)
 	}
-	if err := r.rt.RegisterPrivateResource(privateProviderResource, redisProvider); err != nil {
+	if err := rt.RegisterPrivateResource(privateProviderResource, redisProvider); err != nil {
 		log.Warnf("failed to register redis private provider resource: %v", err)
 	}
-	if r.conf != nil {
-		if err := r.rt.RegisterPrivateResource(privateConfigResourceName, r.conf); err != nil {
+	if cfg := r.getConfig(); cfg != nil {
+		if err := rt.RegisterPrivateResource(privateConfigResourceName, cfg); err != nil {
 			log.Warnf("failed to register redis private config resource: %v", err)
 		}
 	}
