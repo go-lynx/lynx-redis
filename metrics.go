@@ -1,3 +1,7 @@
+// Package redis provides a Redis client plugin for the Lynx framework.
+// It wraps go-redis/v9's UniversalClient to support standalone, sentinel, and cluster topologies,
+// exposes a stable Provider interface so long-lived callers never hold a stale raw client,
+// and collects Prometheus metrics for pool health, command latency, and startup state.
 package redis
 
 import (

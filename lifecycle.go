@@ -105,41 +105,6 @@ func (r *PlugRedis) StartupTasks() error {
 	return nil
 }
 
-// cleanupOnStartupFailure cleans up resources on startup failure
-func (r *PlugRedis) cleanupOnStartupFailure() {
-	// Close Redis client
-	client := r.getClient()
-	if client != nil {
-		if err := client.Close(); err != nil {
-			log.Warnf("failed to close redis client during startup cleanup: %v", err)
-		}
-		r.setClient(nil)
-	}
-
-	// Clean up collector channel
-	r.mu.Lock()
-	statsQuit := r.statsQuit
-	r.statsQuit = nil
-	r.mu.Unlock()
-	if statsQuit != nil {
-		close(statsQuit)
-	}
-
-	// Wait for potentially started goroutines to exit
-	done := make(chan struct{})
-	go func() {
-		r.statsWG.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		log.Infof("startup cleanup completed successfully")
-	case <-time.After(5 * time.Second):
-		log.Warnf("timeout waiting for goroutines cleanup during startup failure")
-	}
-}
-
 // CleanupTasks closes Redis client
 // Returns error information, returns corresponding error if client closing fails
 func (r *PlugRedis) CleanupTasks() error {
