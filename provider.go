@@ -54,7 +54,7 @@ func GetProvider() Provider {
 
 func (provider) UniversalClient(ctx context.Context) (goredis.UniversalClient, error) {
 	if ctx == nil {
-		ctx = context.Background()
+		return nil, fmt.Errorf("redis: UniversalClient requires a non-nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func (p provider) Mode(ctx context.Context) (string, error) {
 func (r *PlugRedis) publishResourceContract() {
 	client := r.getClient()
 	rt := r.getRuntime()
-	if r == nil || rt == nil || client == nil {
+	if rt == nil || client == nil {
 		return
 	}
 

@@ -8,7 +8,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// PlugRedis represents a Redis plugin instance
+// PlugRedis is the Lynx plugin that manages a go-redis UniversalClient.
+// It supports standalone, Sentinel, and Cluster topologies; the active topology
+// is determined automatically from the configuration at startup.
+// Use GetProvider to obtain a stable Provider handle rather than holding a reference
+// to the raw client directly.
 type PlugRedis struct {
 	// Inherits from base plugin
 	*plugins.BasePlugin
@@ -58,7 +62,8 @@ func (r *PlugRedis) getRuntime() plugins.Runtime {
 	return r.rt
 }
 
-// GetPoolStats returns the connection pool statistics
+// GetPoolStats returns the current connection pool statistics, or nil when the client
+// has not been started or has already been stopped.
 func (r *PlugRedis) GetPoolStats() *redis.PoolStats {
 	client := r.getClient()
 	if client == nil {
@@ -83,7 +88,8 @@ func (r *PlugRedis) GetPoolStats() *redis.PoolStats {
 	return nil
 }
 
-// HealthCheck performs a health check on the Redis connection
+// HealthCheck performs a PING health check and returns (true, nil) on success.
+// It is a convenience wrapper around CheckHealth for callers that prefer a boolean result.
 func (r *PlugRedis) HealthCheck() (bool, error) {
 	err := r.CheckHealth()
 	return err == nil, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -11,14 +12,16 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// CacheManager provides advanced cache management features
+// CacheManager provides a JSON-serialising cache layer on top of a Redis UniversalClient.
+// It tracks hit/miss/error statistics and exposes them via GetStats.
 type CacheManager struct {
 	client redis.UniversalClient
 	logger zerolog.Logger
 	stats  *CacheStats
 }
 
-// CacheStats cache statistics
+// CacheStats holds cumulative counters for a CacheManager instance.
+// The lastReset field records when the counters were last zeroed via ResetStats.
 type CacheStats struct {
 	Hits       uint64
 	Misses     uint64
@@ -41,8 +44,10 @@ func NewCacheManager(client redis.UniversalClient, logger zerolog.Logger) *Cache
 	}
 }
 
-// GetWithLoader gets from cache, or uses loader when missing
-func (cm *CacheManager) GetWithLoader(ctx context.Context, key string, loader func() (interface{}, error), ttl time.Duration) (interface{}, error) {
+// GetWithLoader gets a value from the cache. On a cache miss, the loader function is called to
+// fetch the value, which is then marshalled as JSON and stored in Redis with the given TTL.
+// If unmarshalling the cached value fails it is treated as a miss and the loader is invoked.
+func (cm *CacheManager) GetWithLoader(ctx context.Context, key string, loader func() (any, error), ttl time.Duration) (any, error) {
 	start := time.Now()
 	defer cm.recordLatency(start)
 
@@ -51,7 +56,7 @@ func (cm *CacheManager) GetWithLoader(ctx context.Context, key string, loader fu
 	if err == nil {
 		cm.recordHit()
 
-		var result interface{}
+		var result any
 		if unmarshalErr := json.Unmarshal([]byte(val), &result); unmarshalErr == nil {
 			return result, nil
 		}
@@ -85,8 +90,9 @@ func (cm *CacheManager) GetWithLoader(ctx context.Context, key string, loader fu
 	return data, nil
 }
 
-// SetWithRetry sets cache value with retry
-func (cm *CacheManager) SetWithRetry(ctx context.Context, key string, value interface{}, ttl time.Duration, maxRetries int) error {
+// SetWithRetry stores a JSON-marshalled value in Redis, retrying up to maxRetries times with
+// exponential backoff on failure. The context is honoured between retries so callers can cancel.
+func (cm *CacheManager) SetWithRetry(ctx context.Context, key string, value any, ttl time.Duration, maxRetries int) error {
 	jsonData, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to marshal value: %w", err)
@@ -105,8 +111,16 @@ func (cm *CacheManager) SetWithRetry(ctx context.Context, key string, value inte
 			Str("key", key).
 			Msg("Retry cache set")
 
-		// Exponential backoff
-		time.Sleep(time.Duration(1<<uint(i)) * time.Millisecond * 100)
+		// Exponential backoff – honour context cancellation while waiting
+		delay := time.Duration(1<<uint(i)) * 100 * time.Millisecond
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			cm.recordError()
+			return fmt.Errorf("set cache cancelled: %w", ctx.Err())
+		case <-timer.C:
+		}
 	}
 
 	cm.recordError()
@@ -211,7 +225,10 @@ func (cm *CacheManager) recordLatency(start time.Time) {
 	}
 }
 
-// DistributedLock distributed lock implementation
+// DistributedLock implements a Redis-backed distributed mutual exclusion lock using the
+// SET NX PX pattern and a Lua script for safe release. Each lock instance should be used
+// by a single goroutine; concurrent calls to Lock/Unlock from multiple goroutines are
+// serialised internally.
 type DistributedLock struct {
 	client   redis.UniversalClient
 	key      string
@@ -336,7 +353,9 @@ func (dl *DistributedLock) Extend(ctx context.Context, additionalTTL time.Durati
 	return nil
 }
 
-// RateLimiter rate limiter
+// RateLimiter implements a sliding-window rate limiter backed by a Redis sorted set.
+// Each call to Allow atomically removes expired entries and records the new event,
+// making it safe to use across multiple process instances sharing the same Redis.
 type RateLimiter struct {
 	client redis.UniversalClient
 	logger zerolog.Logger
@@ -411,7 +430,8 @@ func (rl *RateLimiter) Reset(ctx context.Context, key string) error {
 	return rl.client.Del(ctx, key).Err()
 }
 
-// randInt generates a pseudo-random int
+// randInt generates a random int suitable for use as a unique token in lock values
+// and rate-limiter members.
 func randInt() int {
-	return int(time.Now().UnixNano() % 1000000)
+	return int(rand.Int64())
 }

@@ -443,21 +443,18 @@ func validateNetworkConfig(config *conf.Redis, result *ValidationResult) {
 	}
 }
 
-// ValidateAndSetDefaults validates configuration and sets reasonable defaults
+// ValidateAndSetDefaults fills in any zero-value fields with production-sensible defaults
+// and then validates the resulting configuration. The two-phase approach (fill then validate)
+// avoids false positives when a caller omits optional fields that have defaults.
 func ValidateAndSetDefaults(config *conf.Redis) error {
-	// First validate the configuration
+	// Apply defaults first so that optional fields like MaxActiveConns are non-zero
+	// before validation rules check their ranges.
+	setDefaultValues(config)
+
+	// Full validation after defaults are applied.
 	result := ValidateRedisConfig(config)
 	if !result.IsValid {
 		return fmt.Errorf("configuration validation failed: %s", result.Error())
-	}
-
-	// Set default values
-	setDefaultValues(config)
-
-	// Validate again (ensure configuration remains valid after default values are set)
-	result = ValidateRedisConfig(config)
-	if !result.IsValid {
-		return fmt.Errorf("configuration validation failed after setting defaults: %s", result.Error())
 	}
 
 	return nil
@@ -472,7 +469,10 @@ func setDefaultValues(config *conf.Redis) {
 		config.Network = "tcp"
 	}
 
-	// Connection pool default values
+	// Connection pool default values.
+	// Production-oriented defaults: PoolSize / MaxActiveConns = 100 per instance is
+	// a sensible starting point for a microservice under real load.  MinIdleConns keeps
+	// a warm baseline so the first burst of traffic doesn't pay connection-setup latency.
 	if config.MinIdleConns == 0 {
 		config.MinIdleConns = 10
 	}
@@ -480,7 +480,7 @@ func setDefaultValues(config *conf.Redis) {
 		config.MaxIdleConns = 20
 	}
 	if config.MaxActiveConns == 0 {
-		config.MaxActiveConns = 20
+		config.MaxActiveConns = 100
 	}
 
 	// Timeout default values
@@ -499,9 +499,11 @@ func setDefaultValues(config *conf.Redis) {
 		config.PoolTimeout = durationpb.New(3 * time.Second)
 	}
 
-	// Connection lifecycle default values
+	// Connection lifecycle default values.
+	// ConnMaxIdleTime of 5 minutes matches Redis server's default tcp-keepalive window and
+	// avoids connections being silently dropped by firewalls with short idle timeouts.
 	if config.ConnMaxIdleTime == nil {
-		config.ConnMaxIdleTime = durationpb.New(10 * time.Second)
+		config.ConnMaxIdleTime = durationpb.New(5 * time.Minute)
 	}
 	if config.ConnMaxLifetime == nil {
 		config.ConnMaxLifetime = durationpb.New(30 * time.Minute)
@@ -645,33 +647,33 @@ func (rcv *RedisConfigValidator) registerDefaultValues() {
 	rcv.defaultSetter.SetDefault("MaxIdleConns", int32(20))
 
 	// Timeout defaults
-	rcv.defaultSetter.SetDefaultFunc("DialTimeout", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("DialTimeout", func(any) any {
 		return durationpb.New(5 * time.Second)
 	})
-	rcv.defaultSetter.SetDefaultFunc("ReadTimeout", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("ReadTimeout", func(any) any {
 		return durationpb.New(3 * time.Second)
 	})
-	rcv.defaultSetter.SetDefaultFunc("WriteTimeout", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("WriteTimeout", func(any) any {
 		return durationpb.New(3 * time.Second)
 	})
-	rcv.defaultSetter.SetDefaultFunc("PoolTimeout", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("PoolTimeout", func(any) any {
 		return durationpb.New(4 * time.Second)
 	})
 
 	// Connection lifecycle defaults
-	rcv.defaultSetter.SetDefaultFunc("ConnMaxIdleTime", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("ConnMaxIdleTime", func(any) any {
 		return durationpb.New(30 * time.Minute)
 	})
-	rcv.defaultSetter.SetDefaultFunc("ConnMaxLifetime", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("ConnMaxLifetime", func(any) any {
 		return durationpb.New(0) // 0 means no limit
 	})
 
 	// Retry defaults
 	rcv.defaultSetter.SetDefault("MaxRetries", int32(3))
-	rcv.defaultSetter.SetDefaultFunc("MinRetryBackoff", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("MinRetryBackoff", func(any) any {
 		return durationpb.New(8 * time.Millisecond)
 	})
-	rcv.defaultSetter.SetDefaultFunc("MaxRetryBackoff", func(interface{}) interface{} {
+	rcv.defaultSetter.SetDefaultFunc("MaxRetryBackoff", func(any) any {
 		return durationpb.New(512 * time.Millisecond)
 	})
 
@@ -707,7 +709,7 @@ func (rcv *RedisConfigValidator) ValidateRedisConfigWithFramework(cfg *conf.Redi
 // Custom validation functions
 
 // validateAddresses validates Redis server addresses
-func (rcv *RedisConfigValidator) validateAddresses(value interface{}, context config.ValidationContext) error {
+func (rcv *RedisConfigValidator) validateAddresses(value any, context config.ValidationContext) error {
 	addrs, ok := value.([]string)
 	if !ok {
 		return fmt.Errorf("expected []string, got %T", value)
@@ -767,7 +769,7 @@ func (rcv *RedisConfigValidator) validateSingleAddress(addr string) error {
 }
 
 // validateClientName validates Redis client name
-func (rcv *RedisConfigValidator) validateClientName(value interface{}, context config.ValidationContext) error {
+func (rcv *RedisConfigValidator) validateClientName(value any, context config.ValidationContext) error {
 	clientName, ok := value.(string)
 	if !ok {
 		return fmt.Errorf("expected string, got %T", value)

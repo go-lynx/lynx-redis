@@ -31,11 +31,11 @@ type RedisIntegrationTestSuite struct {
 
 // mockRuntime mock implementation of Runtime
 type mockRuntime struct {
-	resources map[string]interface{}
+	resources map[string]any
 	mu        sync.RWMutex
 }
 
-func (m *mockRuntime) GetResource(id string) (interface{}, error) {
+func (m *mockRuntime) GetResource(id string) (any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if res, ok := m.resources[id]; ok {
@@ -44,7 +44,7 @@ func (m *mockRuntime) GetResource(id string) (interface{}, error) {
 	return nil, fmt.Errorf("resource %s not found", id)
 }
 
-func (m *mockRuntime) RegisterResource(id string, resource interface{}) error {
+func (m *mockRuntime) RegisterResource(id string, resource any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.resources[id] = resource
@@ -55,11 +55,11 @@ func (m *mockRuntime) GetPlugin(name string) plugins.Plugin {
 	return nil
 }
 
-func (m *mockRuntime) PublishEvent(event interface{}) error {
+func (m *mockRuntime) PublishEvent(event any) error {
 	return nil
 }
 
-func (m *mockRuntime) SubscribeEvent(eventType string, handler func(interface{})) error {
+func (m *mockRuntime) SubscribeEvent(eventType string, handler func(any)) error {
 	return nil
 }
 
@@ -160,7 +160,7 @@ func (m *mockRuntime) CleanupResources(resourceType string) error {
 	// Mock implementation - clear all resources
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.resources = make(map[string]interface{})
+	m.resources = make(map[string]any)
 	return nil
 }
 
@@ -190,7 +190,7 @@ func (m *mockRuntime) ListResources() []*plugins.ResourceInfo {
 func (suite *RedisIntegrationTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.runtime = &mockRuntime{
-		resources: make(map[string]interface{}),
+		resources: make(map[string]any),
 	}
 
 	// Create Redis plugin
@@ -279,7 +279,7 @@ func (suite *RedisIntegrationTestSuite) TestHashOperations() {
 	assert.Equal(suite.T(), "value1", val)
 
 	// Test HMSET and HMGET
-	err = client.HMSet(ctx, "test_hash", map[string]interface{}{
+	err = client.HMSet(ctx, "test_hash", map[string]any{
 		"field2": "value2",
 		"field3": "value3",
 	}).Err()
@@ -287,7 +287,7 @@ func (suite *RedisIntegrationTestSuite) TestHashOperations() {
 
 	vals, err := client.HMGet(ctx, "test_hash", "field2", "field3").Result()
 	assert.NoError(suite.T(), err)
-	assert.Equal(suite.T(), []interface{}{"value2", "value3"}, vals)
+	assert.Equal(suite.T(), []any{"value2", "value3"}, vals)
 
 	// Test HGETALL
 	all, err := client.HGetAll(ctx, "test_hash").Result()

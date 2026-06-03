@@ -130,6 +130,11 @@ func (r *PlugRedis) startInfoCollector(mode string) {
 	r.statsWG.Add(1)
 	go func() {
 		defer r.statsWG.Done()
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Errorf("redis info collector panic: %v", rec)
+			}
+		}()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {

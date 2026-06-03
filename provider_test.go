@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -97,5 +99,144 @@ func TestRateLimiter_RejectsInvalidConfig(t *testing.T) {
 	}
 	if allowed, err := limiter.Allow(context.Background(), "rate:test", 1, 0); err == nil || allowed {
 		t.Fatal("expected non-positive window to be rejected without allowing request")
+	}
+}
+
+// TestProvider_NilContextIsRejected ensures that passing a nil context is an explicit error
+// rather than a silent fallback to context.Background(), which would hide caller bugs.
+func TestProvider_NilContextIsRejected(t *testing.T) {
+	p := GetProvider()
+	//nolint:staticcheck // intentionally passing nil to verify error handling
+	_, err := p.UniversalClient(nil)
+	if err == nil {
+		t.Fatal("expected error for nil context")
+	}
+	if !strings.Contains(err.Error(), "non-nil context") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+// TestProvider_CancelledContextIsRejected ensures that an already-cancelled context
+// is rejected before any plugin lookup is attempted.
+func TestProvider_CancelledContextIsRejected(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := GetProvider().UniversalClient(ctx)
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+}
+
+// TestPlugRedis_DetectMode verifies topology detection from configuration.
+func TestPlugRedis_DetectMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      *conf.Redis
+		wantMode string
+	}{
+		{
+			name:     "single node",
+			cfg:      &conf.Redis{Addrs: []string{"localhost:6379"}},
+			wantMode: "single",
+		},
+		{
+			name:     "cluster",
+			cfg:      &conf.Redis{Addrs: []string{"node1:6379", "node2:6379", "node3:6379"}},
+			wantMode: "cluster",
+		},
+		{
+			name: "sentinel",
+			cfg: &conf.Redis{
+				Addrs:    []string{"sentinel1:26379"},
+				Sentinel: &conf.Redis_Sentinel{MasterName: "mymaster", Addrs: []string{"sentinel1:26379"}},
+			},
+			wantMode: "sentinel",
+		},
+		{
+			name:     "nil config",
+			cfg:      nil,
+			wantMode: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin := NewRedisClient()
+			plugin.conf = tt.cfg
+			mode := plugin.detectMode()
+			if mode != tt.wantMode {
+				t.Errorf("detectMode() = %q, want %q", mode, tt.wantMode)
+			}
+		})
+	}
+}
+
+// TestPlugRedis_CurrentAddrList verifies that sentinel address override takes precedence.
+func TestPlugRedis_CurrentAddrList(t *testing.T) {
+	plugin := NewRedisClient()
+	plugin.conf = &conf.Redis{
+		Addrs: []string{"fallback:6379"},
+		Sentinel: &conf.Redis_Sentinel{
+			MasterName: "mymaster",
+			Addrs:      []string{"sentinel1:26379", "sentinel2:26379"},
+		},
+	}
+	addrs := plugin.currentAddrList()
+	if len(addrs) != 2 || addrs[0] != "sentinel1:26379" {
+		t.Errorf("expected sentinel addrs, got %v", addrs)
+	}
+}
+
+// TestPlugRedis_StartPoolStatsCollector_NilQuit verifies that calling
+// startPoolStatsCollector before statsQuit is initialised is a no-op.
+func TestPlugRedis_StartPoolStatsCollector_NilQuit(t *testing.T) {
+	plugin := NewRedisClient()
+	// statsQuit is nil – must not panic or block
+	plugin.startPoolStatsCollector()
+}
+
+// TestPlugRedis_StartInfoCollector_NilQuit verifies that calling
+// startInfoCollector before statsQuit is initialised is a no-op.
+func TestPlugRedis_StartInfoCollector_NilQuit(t *testing.T) {
+	plugin := NewRedisClient()
+	// statsQuit is nil – must not panic or block
+	plugin.startInfoCollector("single")
+}
+
+// TestCacheManager_SetWithRetry_ContextCancelled verifies that SetWithRetry honours
+// context cancellation during the backoff delay between retries.
+func TestCacheManager_SetWithRetry_ContextCancelled(t *testing.T) {
+	// Use a client that is guaranteed to fail every Set (unreachable host)
+	client := goredis.NewClient(&goredis.Options{
+		Addr:        "localhost:19999",
+		DialTimeout: time.Millisecond,
+		ReadTimeout: time.Millisecond,
+	})
+	cm := NewCacheManager(client, zerolog.Nop())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := cm.SetWithRetry(ctx, "key", "val", time.Minute, 10)
+	if err == nil {
+		t.Fatal("expected error when context times out")
+	}
+}
+
+// TestPlugRedis_ValidateAndSetDefaults_ZeroMaxActiveConns verifies that omitting
+// MaxActiveConns does not fail validation because defaults are applied first.
+func TestPlugRedis_ValidateAndSetDefaults_ZeroMaxActiveConns(t *testing.T) {
+	cfg := &conf.Redis{
+		Addrs: []string{"localhost:6379"},
+		// MaxActiveConns intentionally omitted (zero value)
+	}
+	if err := ValidateAndSetDefaults(cfg); err != nil {
+		t.Fatalf("expected no error when MaxActiveConns is omitted; got: %v", err)
+	}
+	if cfg.MaxActiveConns != 100 {
+		t.Errorf("expected default MaxActiveConns=100, got %d", cfg.MaxActiveConns)
 	}
 }

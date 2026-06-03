@@ -290,8 +290,8 @@ func TestSetDefaultValues(t *testing.T) {
 	if config.MaxIdleConns != 20 {
 		t.Errorf("Expected MaxIdleConns to be 20, got %d", config.MaxIdleConns)
 	}
-	if config.MaxActiveConns != 20 {
-		t.Errorf("Expected MaxActiveConns to be 20, got %d", config.MaxActiveConns)
+	if config.MaxActiveConns != 100 {
+		t.Errorf("Expected MaxActiveConns to be 100, got %d", config.MaxActiveConns)
 	}
 	if config.MaxRetries != 3 {
 		t.Errorf("Expected MaxRetries to be 3, got %d", config.MaxRetries)
