@@ -11,10 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// InitializeResources implements custom initialization logic for Redis plugin
-// Scans and loads Redis configuration from runtime config, uses default config if not provided
-// Parameter rt is the runtime environment
-// Returns error information, returns corresponding error if configuration loading fails
+// InitializeResources loads Redis configuration from the runtime config.
+// Skips scanning when conf is pre-set (e.g. in tests).
 func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
 	if err := r.BasePlugin.InitializeResources(rt); err != nil {
 		return err
@@ -24,7 +22,6 @@ func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
 	cfg := r.conf
 	r.mu.Unlock()
 
-	// Scan config from runtime only when not pre-set (e.g. in tests)
 	if cfg == nil {
 		cfg = &conf.Redis{}
 		runtimeConf := rt.GetConfig()
@@ -36,7 +33,6 @@ func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
 		}
 	}
 
-	// Validate configuration and set default values
 	if err := ValidateAndSetDefaults(cfg); err != nil {
 		return fmt.Errorf("redis configuration validation failed: %w", err)
 	}
@@ -47,8 +43,8 @@ func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
 	return nil
 }
 
-// StartupTasks starts Redis client and performs health check
-// Returns error information, returns corresponding error if startup or health check fails
+// StartupTasks creates the universal client, runs a startup ping, then launches
+// pool-stats and info collectors.
 func (r *PlugRedis) StartupTasks() error {
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
@@ -57,19 +53,12 @@ func (r *PlugRedis) StartupTasks() error {
 		return fmt.Errorf("redis client already started")
 	}
 
-	// Log Redis client startup
 	log.Infof("starting redis client")
-
-	// Increment startup counter
 	redisStartupTotal.Inc()
 
-	// Create Redis universal client (supports single node/cluster/sentinel)
 	client := redis.NewUniversalClient(r.buildUniversalOptions())
-
-	// Register command-level metrics hook
 	client.AddHook(metricsHook{})
 
-	// Perform quick health check at startup (short timeout)
 	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	start := time.Now()
 	_, err := client.Ping(pingCtx).Result()
@@ -89,29 +78,21 @@ func (r *PlugRedis) StartupTasks() error {
 	r.statsQuit = make(chan struct{})
 	r.mu.Unlock()
 
-	// Determine mode (single node/cluster/sentinel)
 	mode := r.detectMode()
 	log.Infof("redis client successfully started, mode=%s, addrs=%v, ping_latency=%s", mode, r.currentAddrList(), latency)
 
 	r.publishResourceContract()
-
-	// Perform enhanced check at startup stage
 	r.enhancedReadinessCheck(mode)
-
-	// Start pool statistics collector
 	r.startPoolStatsCollector()
-	// Start info collector
 	r.startInfoCollector(mode)
 	return nil
 }
 
-// CleanupTasks closes Redis client
-// Returns error information, returns corresponding error if client closing fails
+// CleanupTasks stops background collectors and closes the Redis client.
 func (r *PlugRedis) CleanupTasks() error {
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
 
-	// If Redis client is not initialized, return nil directly
 	r.mu.Lock()
 	client := r.rdb
 	statsQuit := r.statsQuit
@@ -123,10 +104,8 @@ func (r *PlugRedis) CleanupTasks() error {
 		return nil
 	}
 
-	// Stop collectors
 	if statsQuit != nil {
 		close(statsQuit)
-		// Wait for all collector goroutines to exit, set timeout to avoid infinite waiting
 		done := make(chan struct{})
 		go func() {
 			r.statsWG.Wait()
@@ -141,22 +120,18 @@ func (r *PlugRedis) CleanupTasks() error {
 		}
 	}
 
-	// Close Redis client
 	if err := client.Close(); err != nil {
-		// Return error with plugin information
 		return plugins.NewPluginError(r.ID(), "Stop", "Failed to stop Redis client", err)
 	}
 	return nil
 }
 
-// Configure allows updating Redis server configuration at runtime
-// Parameter c should be a pointer to a conf.Redis structure, containing new configuration information
-// Returns error information, returns corresponding error if configuration update fails
+// Configure updates the in-memory Redis config. Connection parameters take effect
+// only after a managed restart — the live client is not reconnected here.
 func (r *PlugRedis) Configure(c any) error {
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
 
-	// If the incoming configuration is nil, return nil directly
 	if c == nil {
 		return nil
 	}
@@ -167,8 +142,6 @@ func (r *PlugRedis) Configure(c any) error {
 	if err := ValidateAndSetDefaults(newConf); err != nil {
 		return fmt.Errorf("redis configuration validation failed: %w", err)
 	}
-	// Redis connections are created during startup; runtime Configure only updates the stored config
-	// and the new values take effect after the next managed restart.
 	r.mu.Lock()
 	r.conf = newConf
 	running := r.rdb != nil
@@ -179,22 +152,17 @@ func (r *PlugRedis) Configure(c any) error {
 	return nil
 }
 
-// CheckHealth implements the health check interface for Redis server
-// Performs necessary health checks on the Redis server and updates the provided health report
-// Parameter report is a pointer to the health report, used to record health check results
-// Returns error information, returns corresponding error if health check fails
+// CheckHealth PINGs Redis with a 2-second timeout.
 func (r *PlugRedis) CheckHealth() error {
 	client := r.getClient()
 	if client == nil {
 		return fmt.Errorf("redis client not initialized")
 	}
 
-	// Perform health check with fixed short timeout to avoid being affected by idle connection configuration
+	// Fixed 2 s timeout avoids being blocked by a long idle-connection deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	// Ensure context is cancelled at the end of the function
 	defer cancel()
 
-	// Execute Redis client Ping operation for health check
 	start := time.Now()
 	_, err := client.Ping(ctx).Result()
 	latency := time.Since(start)
