@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,13 +45,32 @@ func (r *PlugRedis) InitializeResources(rt plugins.Runtime) error {
 }
 
 // StartupTasks creates the universal client, runs a startup ping, then launches
-// pool-stats and info collectors.
+// pool-stats and info collectors. It is the legacy (non-cancellable) entrypoint
+// and delegates to StartupTasksContext with a background context.
 func (r *PlugRedis) StartupTasks() error {
+	return r.StartupTasksContext(context.Background())
+}
+
+// StartupTasksContext creates the universal client, runs a startup ping bound
+// to ctx (capped at 2s), then launches pool-stats and info collectors. If ctx
+// is cancelled at any step before the client is published, the client is
+// closed and the ctx error is returned.
+func (r *PlugRedis) StartupTasksContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("redis startup canceled before execution: %w", err)
+	}
+
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
 
 	if r.getClient() != nil {
 		return fmt.Errorf("redis client already started")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("redis startup canceled: %w", err)
 	}
 
 	log.Infof("starting redis client")
@@ -59,15 +79,22 @@ func (r *PlugRedis) StartupTasks() error {
 	client := redis.NewUniversalClient(r.buildUniversalOptions())
 	client.AddHook(metricsHook{})
 
-	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	start := time.Now()
 	_, err := client.Ping(pingCtx).Result()
 	cancel()
+	if err == nil {
+		// Do not publish a client the caller has already given up on.
+		err = ctx.Err()
+	}
 	if err != nil {
 		if closeErr := client.Close(); closeErr != nil {
 			log.Warnf("failed to close redis client during startup cleanup: %v", closeErr)
 		}
 		redisStartupFailedTotal.Inc()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("redis startup canceled during ping: %w", errors.Join(ctxErr, err))
+		}
 		return fmt.Errorf("redis ping failed during startup: %w", err)
 	}
 	latency := time.Since(start)
@@ -82,14 +109,31 @@ func (r *PlugRedis) StartupTasks() error {
 	log.Infof("redis client successfully started, mode=%s, addrs=%v, ping_latency=%s", mode, r.currentAddrList(), latency)
 
 	r.publishResourceContract()
-	r.enhancedReadinessCheck(mode)
+	r.enhancedReadinessCheckContext(ctx, mode)
 	r.startPoolStatsCollector()
 	r.startInfoCollector(mode)
 	return nil
 }
 
-// CleanupTasks stops background collectors and closes the Redis client.
+// CleanupTasks stops background collectors and closes the Redis client. It is
+// the legacy (non-cancellable) entrypoint and delegates to CleanupTasksContext
+// with a background context.
 func (r *PlugRedis) CleanupTasks() error {
+	return r.CleanupTasksContext(context.Background())
+}
+
+// CleanupTasksContext stops background collectors and closes the Redis client
+// while honoring ctx. Waiting for the collectors is bounded by both ctx and a
+// 10s cap; closing the client is bounded by ctx. When ctx expires the client is
+// still closed in the background so the connections are eventually released.
+func (r *PlugRedis) CleanupTasksContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("redis cleanup canceled before execution: %w", err)
+	}
+
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
 
@@ -117,11 +161,23 @@ func (r *PlugRedis) CleanupTasks() error {
 			log.Infof("redis stats collectors stopped successfully")
 		case <-time.After(10 * time.Second):
 			log.Warnf("timeout waiting for redis stats collectors to stop")
+		case <-ctx.Done():
+			log.Warnf("context canceled while waiting for redis stats collectors to stop: %v", ctx.Err())
 		}
 	}
 
-	if err := client.Close(); err != nil {
-		return plugins.NewPluginError(r.ID(), "Stop", "Failed to stop Redis client", err)
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- client.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			return plugins.NewPluginError(r.ID(), "Stop", "Failed to stop Redis client", err)
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("redis cleanup canceled while closing client (close continues in background): %w", ctx.Err())
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("redis cleanup canceled: %w", err)
 	}
 	return nil
 }

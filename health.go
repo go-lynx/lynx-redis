@@ -42,11 +42,23 @@ func (r *PlugRedis) currentAddrList() []string {
 
 // enhancedReadinessCheck performs stricter readiness checks based on mode
 func (r *PlugRedis) enhancedReadinessCheck(mode string) {
+	r.enhancedReadinessCheckContext(context.Background(), mode)
+}
+
+// enhancedReadinessCheckContext is the ctx-bound form of enhancedReadinessCheck.
+// Each probe is limited to 3s and is aborted early when parent is cancelled.
+func (r *PlugRedis) enhancedReadinessCheckContext(parent context.Context, mode string) {
 	client := r.getClient()
 	if client == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	if parent == nil {
+		parent = context.Background()
+	}
+	if parent.Err() != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 	switch c := client.(type) {
 	case *redis.ClusterClient:
@@ -86,7 +98,7 @@ func (r *PlugRedis) enhancedReadinessCheck(mode string) {
 		}
 	}
 	// Write server_info metrics once
-	version := r.readRedisVersion()
+	version := r.readRedisVersionContext(parent)
 	clientName := ""
 	if cfg := r.getConfig(); cfg != nil {
 		clientName = cfg.ClientName
@@ -95,11 +107,22 @@ func (r *PlugRedis) enhancedReadinessCheck(mode string) {
 }
 
 func (r *PlugRedis) readRedisVersion() string {
+	return r.readRedisVersionContext(context.Background())
+}
+
+// readRedisVersionContext is the ctx-bound form of readRedisVersion (2s cap).
+func (r *PlugRedis) readRedisVersionContext(parent context.Context) string {
 	client := r.getClient()
 	if client == nil {
 		return "unknown"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if parent == nil {
+		parent = context.Background()
+	}
+	if parent.Err() != nil {
+		return "unknown"
+	}
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	info, err := client.Info(ctx, "server").Result()
 	if err != nil {
