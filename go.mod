@@ -5,8 +5,8 @@ go 1.26
 toolchain go1.26.2
 
 require (
-	github.com/go-kratos/kratos/v2 v2.9.1
-	github.com/go-lynx/lynx v1.6.3
+	github.com/go-kratos/kratos/v2 v2.9.2
+	github.com/go-lynx/lynx v1.6.4
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/prometheus/client_golang v1.23.2
@@ -40,8 +40,6 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.43.0 // indirect
-	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
